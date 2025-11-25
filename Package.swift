@@ -22,5 +22,10 @@ let package = Package(
             dependencies: [],
             path: "Sources/ZumuTranslator"
         ),
+        .testTarget(
+            name: "ZumuTranslatorTests",
+            dependencies: ["ZumuTranslator"],
+            path: "Tests/ZumuTranslatorTests"
+        ),
     ]
 )
