@@ -351,8 +351,19 @@ public class ZumuTranslator: ObservableObject {
             throw ZumuError.networkError("Invalid WebSocket URL")
         }
 
-        let session = URLSession(configuration: .default)
+        // Configure URLSession with proper timeouts and keep-alive
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 300
+        config.waitsForConnectivity = true
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+
+        let session = URLSession(configuration: config)
         webSocketTask = session.webSocketTask(with: url)
+
+        // Set maximum message size (10MB for audio)
+        webSocketTask?.maximumMessageSize = 10 * 1024 * 1024
+
         webSocketTask?.resume()
 
         // IMPORTANT: Never log the host to protect trade secrets
@@ -475,8 +486,17 @@ public class ZumuTranslator: ObservableObject {
             } catch {
                 // WebSocket disconnected - attempt automatic reconnection
                 let nsError = error as NSError
-                print("❌ WebSocket error: \(error.localizedDescription)")
+                print("❌ WebSocket disconnected: \(error.localizedDescription)")
                 print("   Error domain: \(nsError.domain), code: \(nsError.code)")
+
+                // Check for specific error codes
+                if nsError.code == 57 { // ENOTCONN - Socket is not connected
+                    print("   💡 Socket was not connected - likely closed by peer or network issue")
+                } else if nsError.code == 54 { // ECONNRESET - Connection reset by peer
+                    print("   💡 Connection reset by peer")
+                } else if nsError.domain == "NSPOSIXErrorDomain" {
+                    print("   💡 Network/socket level error")
+                }
 
                 await MainActor.run {
                     // Mark as disconnected
@@ -507,6 +527,8 @@ public class ZumuTranslator: ObservableObject {
                 break
             }
         }
+
+        print("📡 WebSocket message receiver stopped")
     }
 
     private func handleWebSocketData(_ data: Data) async {
