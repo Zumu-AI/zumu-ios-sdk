@@ -4,6 +4,7 @@ import AVFoundation
 /// Ready-to-use Zumu Translator UI Component
 /// Drop this view into your app for instant translation UI
 public struct ZumuTranslatorView: View {
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var translator: ZumuTranslator
     @State private var errorMessage: String?
     @State private var isAnimating = false
@@ -84,9 +85,10 @@ public struct ZumuTranslatorView: View {
                     if translator.state == .active {
                         await translator.endSession()
                     }
-                    // Ensure dismiss happens on main thread
+                    // Dismiss the view
                     await MainActor.run {
                         onDismiss?()
+                        dismiss()
                     }
                 }
             }
@@ -473,10 +475,9 @@ public struct ZumuTranslatorView: View {
             // Show confirmation if session is active
             showingCloseConfirmation = true
         } else {
-            // Dismiss immediately if not in session (ensure main thread)
-            Task { @MainActor in
-                onDismiss?()
-            }
+            // Dismiss immediately if not in session
+            onDismiss?()
+            dismiss()
         }
     }
 
