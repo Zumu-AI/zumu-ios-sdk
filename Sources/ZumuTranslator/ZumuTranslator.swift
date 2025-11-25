@@ -76,7 +76,7 @@ public class ZumuTranslator: ObservableObject {
             let conversationData = try await startConversation(sessionId: session.id)
 
             // Step 3: Connect WebSocket for real-time communication
-            try await connectWebSocket(conversationId: conversationData.conversationId, signedUrl: conversationData.signedUrl)
+            try await connectWebSocket(signedUrl: conversationData.signedUrl)
 
             // Step 4: Set up audio capture
             try await setupAudioCapture()
@@ -228,12 +228,11 @@ public class ZumuTranslator: ObservableObject {
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
 
         return ConversationData(
-            conversationId: json["conversation_id"] as! String,
             signedUrl: json["signed_url"] as! String
         )
     }
 
-    private func connectWebSocket(conversationId: String, signedUrl: String) async throws {
+    private func connectWebSocket(signedUrl: String) async throws {
         guard let url = URL(string: signedUrl) else {
             throw ZumuError.networkError("Invalid WebSocket URL")
         }
@@ -410,7 +409,6 @@ public struct TranslationMessage: Identifiable {
 }
 
 struct ConversationData {
-    let conversationId: String
     let signedUrl: String
 }
 
