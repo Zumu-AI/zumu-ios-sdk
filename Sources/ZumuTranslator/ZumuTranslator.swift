@@ -75,8 +75,8 @@ public class ZumuTranslator: ObservableObject {
             // Step 2: Start conversation via Zumu API
             let conversationData = try await startConversation(sessionId: session.id)
 
-            // Step 3: Connect WebSocket for real-time communication
-            try await connectWebSocket(signedUrl: conversationData.signedUrl)
+            // Step 3: Connect WebSocket for real-time communication with handshake
+            try await connectWebSocket(signedUrl: conversationData.signedUrl, context: conversationData.context)
 
             // Step 4: Set up audio capture
             try await setupAudioCapture()
@@ -240,12 +240,21 @@ public class ZumuTranslator: ObservableObject {
 
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
 
+        // Parse context for WebSocket handshake
+        var context: [String: String] = [:]
+        if let contextDict = json["context"] as? [String: Any] {
+            for (key, value) in contextDict {
+                context[key] = "\(value)"
+            }
+        }
+
         return ConversationData(
-            signedUrl: json["signed_url"] as! String
+            signedUrl: json["signed_url"] as! String,
+            context: context
         )
     }
 
-    private func connectWebSocket(signedUrl: String) async throws {
+    private func connectWebSocket(signedUrl: String, context: [String: String]) async throws {
         guard let url = URL(string: signedUrl) else {
             throw ZumuError.networkError("Invalid WebSocket URL")
         }
@@ -254,55 +263,72 @@ public class ZumuTranslator: ObservableObject {
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
 
-        // Start receiving messages immediately
+        print("🔌 WebSocket connected, sending initial handshake...")
+
+        // Send initial handshake with agent variables (CRITICAL for ElevenLabs)
+        let handshake: [String: Any] = [
+            "type": "conversation_initiation_client_data",
+            "conversation_config_override": [
+                "agent": [
+                    "prompt": [
+                        "variables": context
+                    ]
+                ]
+            ]
+        ]
+
+        do {
+            let handshakeData = try JSONSerialization.data(withJSONObject: handshake)
+            try await webSocketTask?.send(.data(handshakeData))
+            print("✅ Handshake sent successfully")
+        } catch {
+            webSocketTask?.cancel(with: .goingAway, reason: nil)
+            webSocketTask = nil
+            throw ZumuError.networkError("Failed to send WebSocket handshake: \(error.localizedDescription)")
+        }
+
+        // Start receiving messages immediately after handshake
         Task {
             await receiveWebSocketMessages()
         }
 
-        // Give WebSocket a moment to establish connection
+        // Give server time to acknowledge handshake
         try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
 
-        // Verify connection by checking if task is still active
+        // Verify connection is still active
         guard webSocketTask != nil else {
-            throw ZumuError.networkError("WebSocket connection failed to establish")
+            throw ZumuError.networkError("WebSocket connection failed after handshake")
         }
+
+        print("✅ WebSocket connection established and stable")
     }
 
     private func receiveWebSocketMessages() async {
+        print("📡 Starting WebSocket message receiver...")
+
         while let task = webSocketTask {
             do {
                 let message = try await task.receive()
 
                 switch message {
                 case .data(let data):
-                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let content = json["content"] as? String,
-                       let role = json["role"] as? String {
-                        let msg = TranslationMessage(role: role, content: content)
-                        await MainActor.run {
-                            self.messages.append(msg)
-                        }
-                    }
+                    await handleWebSocketData(data)
                 case .string(let text):
-                    if let data = text.data(using: .utf8),
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let content = json["content"] as? String,
-                       let role = json["role"] as? String {
-                        let msg = TranslationMessage(role: role, content: content)
-                        await MainActor.run {
-                            self.messages.append(msg)
-                        }
+                    print("📨 Received text message: \(text.prefix(200))...")
+                    if let data = text.data(using: .utf8) {
+                        await handleWebSocketData(data)
                     }
                 @unknown default:
                     break
                 }
             } catch {
                 // WebSocket disconnected - reset to idle for automatic retry capability
+                print("❌ WebSocket error: \(error.localizedDescription)")
                 await MainActor.run {
                     // Only transition to disconnected if we were active
                     // If we were connecting, the error will be caught by startSession
                     if self.state == .active {
-                        print("WebSocket connection lost: \(error.localizedDescription)")
+                        print("WebSocket connection lost during active session")
                         self.state = .disconnected
 
                         // Auto-reset to idle after a brief moment to allow retry
@@ -317,6 +343,36 @@ public class ZumuTranslator: ObservableObject {
                     }
                 }
                 break
+            }
+        }
+    }
+
+    private func handleWebSocketData(_ data: Data) async {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            print("⚠️ Failed to parse WebSocket message as JSON")
+            return
+        }
+
+        // Log the message type for debugging
+        if let type = json["type"] as? String {
+            print("📨 Received message type: \(type)")
+
+            // Handle handshake acknowledgment
+            if type == "conversation_initiation_metadata" {
+                print("✅ Server acknowledged handshake")
+                return
+            }
+
+            // Handle other message types
+            if type == "agent_response" || type == "user_transcript" {
+                if let content = json["content"] as? String,
+                   let role = json["role"] as? String {
+                    let msg = TranslationMessage(role: role, content: content)
+                    await MainActor.run {
+                        self.messages.append(msg)
+                        print("💬 Message added: \(role) - \(content.prefix(50))...")
+                    }
+                }
             }
         }
     }
@@ -481,6 +537,7 @@ public struct TranslationMessage: Identifiable {
 
 struct ConversationData {
     let signedUrl: String
+    let context: [String: String]
 }
 
 // MARK: - Errors
