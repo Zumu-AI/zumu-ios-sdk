@@ -29,6 +29,7 @@ public class ZumuTranslator: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var audioEngine: AVAudioEngine?
     private var audioSession: AVAudioSession?
+    private var isStarting: Bool = false
 
     // MARK: - Initialization
 
@@ -50,15 +51,25 @@ public class ZumuTranslator: ObservableObject {
     /// - Throws: ZumuError if session creation fails
     @MainActor
     public func startSession(config: SessionConfig) async throws -> TranslationSession {
+        // Prevent race conditions from double-clicks
+        guard !isStarting else {
+            throw ZumuError.invalidState("Session start already in progress")
+        }
+
         guard state == .idle else {
             throw ZumuError.invalidState("Cannot start session while in state: \(state)")
         }
 
+        isStarting = true
+        defer { isStarting = false }
+
         state = .connecting
+        var createdSession: TranslationSession?
 
         do {
             // Step 1: Create session on Zumu backend
             let session = try await createBackendSession(config: config)
+            createdSession = session
             self.session = session
 
             // Step 2: Start conversation via Zumu API
@@ -74,9 +85,26 @@ public class ZumuTranslator: ObservableObject {
             return session
 
         } catch {
-            state = .error(error.localizedDescription)
+            // Clean up partial session if created
+            if let session = createdSession {
+                try? await updateSessionStatus(sessionId: session.id, status: "failed")
+            }
+
+            // Reset to idle to allow retry (enterprise-grade error recovery)
+            state = .idle
+            self.session = nil
             throw error
         }
+    }
+
+    /// Reset error state to allow retry
+    /// Call this when you want to retry after an error
+    @MainActor
+    public func resetState() {
+        state = .idle
+        session = nil
+        messages = []
+        isStarting = false
     }
 
     /// End the current translation session
@@ -164,7 +192,9 @@ public class ZumuTranslator: ObservableObject {
 
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
-            throw ZumuError.apiError("Failed to create session")
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let errorBody = String(data: data, encoding: .utf8) ?? "No response body"
+            throw ZumuError.apiError("Failed to create session (HTTP \(statusCode)): \(errorBody)")
         }
 
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
@@ -190,7 +220,9 @@ public class ZumuTranslator: ObservableObject {
 
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
-            throw ZumuError.apiError("Failed to start conversation")
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let errorBody = String(data: data, encoding: .utf8) ?? "No response body"
+            throw ZumuError.apiError("Failed to start conversation (HTTP \(statusCode)): \(errorBody)")
         }
 
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
@@ -305,11 +337,13 @@ public class ZumuTranslator: ObservableObject {
         let body: [String: Any] = ["status": status]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
-            throw ZumuError.apiError("Failed to update session")
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let errorBody = String(data: data, encoding: .utf8) ?? "No response body"
+            throw ZumuError.apiError("Failed to update session (HTTP \(statusCode)): \(errorBody)")
         }
     }
 }
