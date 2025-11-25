@@ -7,6 +7,7 @@ public struct ZumuTranslatorView: View {
     @StateObject private var translator: ZumuTranslator
     @State private var errorMessage: String?
     @State private var isAnimating = false
+    @State private var waveformPhase: CGFloat = 0
 
     private let config: SessionConfig
 
@@ -77,7 +78,7 @@ public struct ZumuTranslatorView: View {
                 case .connecting:
                     HStack(spacing: 8) {
                         ProgressView()
-                            .tint(.blue)
+                            .progressViewStyle(CircularProgressViewStyle(tint: .blue))
                         Text("Connecting...")
                             .foregroundColor(.blue)
                             .font(.system(size: 16, weight: .medium))
@@ -196,12 +197,32 @@ public struct ZumuTranslatorView: View {
                     .opacity(isAnimating ? 0.6 : 0.3)
                     .animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: isAnimating)
 
-                // Status indicator
+                // Enhanced waveform visualization (iOS 15+ compatible)
                 if translator.state == .active {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 60, weight: .ultraLight))
-                        .foregroundColor(.white.opacity(0.8))
-                        .symbolEffect(.variableColor.iterative.reversing, options: .repeating, value: isActive)
+                    ZStack {
+                        // Multiple animated bars creating waveform effect
+                        ForEach(0..<5, id: \.self) { index in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(0.8),
+                                            Color.blue.opacity(0.6),
+                                            Color.purple.opacity(0.6)
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .frame(width: 4, height: waveformHeight(for: index))
+                                .offset(x: CGFloat(index - 2) * 12)
+                        }
+                    }
+                    .onAppear {
+                        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                            waveformPhase = 1.0
+                        }
+                    }
                 }
             }
             .frame(width: 180, height: 180)
@@ -368,6 +389,20 @@ public struct ZumuTranslatorView: View {
         .padding(.horizontal)
     }
 
+    // MARK: - Helper Functions
+
+    private func waveformHeight(for index: Int) -> CGFloat {
+        let baseHeight: CGFloat = 20
+        let maxHeight: CGFloat = 50
+
+        // Create different animation patterns for each bar
+        let offset = CGFloat(index) * 0.2
+        let phase = waveformPhase + offset
+        let normalizedPhase = sin(phase * .pi * 2)
+
+        return baseHeight + (maxHeight - baseHeight) * abs(normalizedPhase)
+    }
+
     // MARK: - Actions
 
     private func handleCallAction() {
@@ -408,17 +443,21 @@ public struct ZumuTranslatorView: View {
 
 // MARK: - Preview
 
-#Preview {
-    ZumuTranslatorView(
-        apiKey: "zumu_preview_key",
-        config: SessionConfig(
-            driverName: "John Driver",
-            driverLanguage: "English",
-            passengerName: "María Passenger",
-            passengerLanguage: "Spanish",
-            tripId: "TRIP-12345",
-            pickupLocation: "123 Main St",
-            dropoffLocation: "456 Oak Ave"
+#if DEBUG
+struct ZumuTranslatorView_Previews: PreviewProvider {
+    static var previews: some View {
+        ZumuTranslatorView(
+            apiKey: "zumu_preview_key",
+            config: SessionConfig(
+                driverName: "John Driver",
+                driverLanguage: "English",
+                passengerName: "María Passenger",
+                passengerLanguage: "Spanish",
+                tripId: "TRIP-12345",
+                pickupLocation: "123 Main St",
+                dropoffLocation: "456 Oak Ave"
+            )
         )
-    )
+    }
 }
+#endif
