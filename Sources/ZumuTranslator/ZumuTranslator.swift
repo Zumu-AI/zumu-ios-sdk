@@ -35,7 +35,7 @@ public class ZumuTranslator: ObservableObject {
     /// - Parameters:
     ///   - apiKey: Your Zumu API key (from dashboard)
     ///   - baseURL: Optional custom base URL (defaults to production)
-    public init(apiKey: String, baseURL: String = "https://api.zumu.ai") {
+    public init(apiKey: String, baseURL: String = "https://translator.zumu.ai") {
         self.apiKey = apiKey
         self.baseURL = baseURL
     }
