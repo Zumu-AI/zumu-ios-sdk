@@ -30,6 +30,9 @@ public class ZumuTranslator: ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var audioSession: AVAudioSession?
     private var isStarting: Bool = false
+    private var audioPlayer: AVAudioPlayer?
+    private var audioQueue: [Data] = []
+    private var isPlayingAudio: Bool = false
 
     // MARK: - Initialization
 
@@ -353,31 +356,115 @@ public class ZumuTranslator: ObservableObject {
 
     private func handleWebSocketData(_ data: Data) async {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            print("⚠️ Failed to parse WebSocket message as JSON")
+            print("⚠️ Failed to parse WebSocket message")
             return
         }
 
-        // Log the message type for debugging
         if let type = json["type"] as? String {
-            print("📨 Received message type: \(type)")
+            print("📨 Received: \(type)")
 
-            // Handle handshake acknowledgment
+            // Handshake acknowledgment
             if type == "conversation_initiation_metadata" {
-                print("✅ Server acknowledged handshake")
+                print("✅ Connection established")
                 return
             }
 
-            // Handle other message types
-            if type == "agent_response" || type == "user_transcript" {
-                if let content = json["content"] as? String,
-                   let role = json["role"] as? String {
-                    let msg = TranslationMessage(role: role, content: content)
+            // Audio from agent
+            if type == "audio" || type == "agent_audio_chunk" {
+                if let audioBase64 = json["audio"] as? String,
+                   let audioData = Data(base64Encoded: audioBase64) {
+                    print("🔊 Playing agent audio (\(audioData.count) bytes)")
+                    await playAudioChunk(audioData)
+                }
+                return
+            }
+
+            // User transcript
+            if type == "user_transcript" {
+                if let transcript = json["transcript"] as? String {
+                    let msg = TranslationMessage(role: "user", content: transcript)
                     await MainActor.run {
                         self.messages.append(msg)
-                        print("💬 Message added: \(role) - \(content.prefix(50))...")
+                        print("👤 User: \(transcript)")
                     }
                 }
+                return
             }
+
+            // Agent response
+            if type == "agent_response" {
+                if let response = json["response"] as? String {
+                    let msg = TranslationMessage(role: "agent", content: response)
+                    await MainActor.run {
+                        self.messages.append(msg)
+                        print("🤖 Agent: \(response)")
+                    }
+                }
+                return
+            }
+
+            // Interruption
+            if type == "interruption" {
+                print("⚠️ Interrupted")
+                await MainActor.run {
+                    self.audioQueue.removeAll()
+                }
+                return
+            }
+
+            // Ping/pong for connection health
+            if type == "ping" {
+                Task {
+                    let pong: [String: String] = ["type": "pong"]
+                    if let pongData = try? JSONSerialization.data(withJSONObject: pong) {
+                        try? await self.webSocketTask?.send(.data(pongData))
+                    }
+                }
+                return
+            }
+        }
+    }
+
+    private func playAudioChunk(_ audioData: Data) async {
+        await MainActor.run {
+            self.audioQueue.append(audioData)
+        }
+
+        if !isPlayingAudio {
+            await processAudioQueue()
+        }
+    }
+
+    private func processAudioQueue() async {
+        await MainActor.run {
+            self.isPlayingAudio = true
+        }
+
+        while !audioQueue.isEmpty {
+            let audioData = await MainActor.run {
+                return self.audioQueue.isEmpty ? nil : self.audioQueue.removeFirst()
+            }
+
+            guard let data = audioData else { break }
+
+            do {
+                let player = try AVAudioPlayer(data: data)
+                await MainActor.run {
+                    self.audioPlayer = player
+                }
+                player.prepareToPlay()
+                player.play()
+
+                while player.isPlaying {
+                    try? await Task.sleep(nanoseconds: 10_000_000)
+                }
+            } catch {
+                print("⚠️ Audio playback error: \(error.localizedDescription)")
+            }
+        }
+
+        await MainActor.run {
+            self.isPlayingAudio = false
         }
     }
 
@@ -432,14 +519,28 @@ public class ZumuTranslator: ObservableObject {
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, time in
-            guard let self = self, let webSocketTask = self.webSocketTask else { return }
+            guard let self = self, let webSocketTask = self.webSocketTask, !self.isMuted else { return }
 
-            // Convert audio buffer to data
+            // Convert audio buffer to PCM data
             let audioData = self.bufferToData(buffer: buffer)
 
-            // Send audio data via WebSocket
+            // Encode as base64 for protocol compatibility
+            let base64Audio = audioData.base64EncodedString()
+
+            // Wrap in protocol message format
+            let message: [String: Any] = [
+                "type": "user_audio_chunk",
+                "audio": base64Audio
+            ]
+
+            // Send as JSON
             Task {
-                try? await webSocketTask.send(.data(audioData))
+                do {
+                    let jsonData = try JSONSerialization.data(withJSONObject: message)
+                    try await webSocketTask.send(.data(jsonData))
+                } catch {
+                    print("⚠️ Failed to send audio: \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -447,9 +548,13 @@ public class ZumuTranslator: ObservableObject {
     private func stopAudioCapture() {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
+        audioPlayer?.stop()
         try? audioSession?.setActive(false)
         audioEngine = nil
         audioSession = nil
+        audioPlayer = nil
+        audioQueue.removeAll()
+        isPlayingAudio = false
     }
 
     private func bufferToData(buffer: AVAudioPCMBuffer) -> Data {
