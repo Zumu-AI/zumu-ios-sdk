@@ -395,20 +395,20 @@ public class ZumuTranslator: ObservableObject {
             await receiveWebSocketMessages()
         }
 
-        // Start connection quality monitoring
-        Task {
-            await monitorConnectionQuality()
-        }
+        // DISABLED: Connection quality monitoring (was causing premature disconnects)
+        // Task {
+        //     await monitorConnectionQuality()
+        // }
 
         // Give server time to acknowledge handshake
-        try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
 
         // Verify connection is still active
         guard webSocketTask != nil else {
             throw ZumuError.networkError("WebSocket connection failed after handshake")
         }
 
-        print("✅ WebSocket connection established and stable")
+        print("✅ WebSocket connection established and ready")
     }
 
     private func monitorConnectionQuality() async {
