@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AVFoundation
+import UIKit
 
 /// Zumu Driver Translator SDK for iOS
 /// Provides real-time translation for driver-passenger conversations
@@ -153,7 +154,7 @@ public class ZumuTranslator: ObservableObject {
             "client_info": [
                 "platform": "iOS",
                 "sdk_version": "1.0.0",
-                "device": await UIDevice.current.model
+                "device": UIDevice.current.model
             ]
         ]
 
