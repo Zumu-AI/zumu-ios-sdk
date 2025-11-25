@@ -72,14 +72,17 @@ public class ZumuTranslator: ObservableObject {
             createdSession = session
             self.session = session
 
-            // Step 2: Start conversation via Zumu API
+            // Step 2: Set up audio capture FIRST (before WebSocket)
+            // This ensures we're ready to stream audio immediately after connection
+            try await setupAudioCapture()
+            print("✅ Audio capture ready")
+
+            // Step 3: Start conversation via Zumu API
             let conversationData = try await startConversation(sessionId: session.id)
 
-            // Step 3: Connect WebSocket for real-time communication with handshake
+            // Step 4: Connect WebSocket for real-time communication with handshake
+            // Audio is already ready, so we can start streaming immediately
             try await connectWebSocket(signedUrl: conversationData.signedUrl, context: conversationData.context)
-
-            // Step 4: Set up audio capture
-            try await setupAudioCapture()
 
             state = .active
             return session
@@ -127,25 +130,26 @@ public class ZumuTranslator: ObservableObject {
 
         state = .ending
 
+        // Disconnect WebSocket
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+
+        // Stop audio capture
+        stopAudioCapture()
+
+        // Update backend session status (best effort - don't fail if this doesn't work)
         do {
-            // Disconnect WebSocket
-            webSocketTask?.cancel(with: .goingAway, reason: nil)
-            webSocketTask = nil
-
-            // Stop audio capture
-            stopAudioCapture()
-
-            // Update backend session status
             try await updateSessionStatus(sessionId: session.id, status: "ended")
-
-            // Reset state
-            self.session = nil
-            self.messages = []
-            state = .idle
-
+            print("✅ Session status updated to 'ended'")
         } catch {
-            state = .error(error.localizedDescription)
+            print("⚠️ Failed to update session status (non-critical): \(error.localizedDescription)")
+            // Continue anyway - WebSocket and audio are already closed
         }
+
+        // Reset state
+        self.session = nil
+        self.messages = []
+        state = .idle
     }
 
     /// Send a text message in the conversation
