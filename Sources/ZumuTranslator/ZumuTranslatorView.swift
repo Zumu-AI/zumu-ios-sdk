@@ -8,13 +8,26 @@ public struct ZumuTranslatorView: View {
     @State private var errorMessage: String?
     @State private var isAnimating = false
     @State private var waveformPhase: CGFloat = 0
+    @State private var showingCloseConfirmation = false
 
     private let config: SessionConfig
+    private let onDismiss: (() -> Void)?
 
     /// Initialize with API key and session configuration
-    public init(apiKey: String, config: SessionConfig, baseURL: String = "https://translator.zumu.ai") {
+    /// - Parameters:
+    ///   - apiKey: Your Zumu API key
+    ///   - config: Session configuration with driver/passenger details
+    ///   - baseURL: Optional custom base URL
+    ///   - onDismiss: Optional callback when user closes the translator
+    public init(
+        apiKey: String,
+        config: SessionConfig,
+        baseURL: String = "https://translator.zumu.ai",
+        onDismiss: (() -> Void)? = nil
+    ) {
         self._translator = StateObject(wrappedValue: ZumuTranslator(apiKey: apiKey, baseURL: baseURL))
         self.config = config
+        self.onDismiss = onDismiss
     }
 
     public var body: some View {
@@ -53,6 +66,29 @@ public struct ZumuTranslatorView: View {
                 Spacer()
             }
             .padding()
+
+            // Close button (top-left corner)
+            VStack {
+                HStack {
+                    closeButton
+                    Spacer()
+                }
+                .padding()
+                Spacer()
+            }
+        }
+        .alert("End Session?", isPresented: $showingCloseConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("End Session", role: .destructive) {
+                Task {
+                    if translator.state == .active {
+                        await translator.endSession()
+                    }
+                    onDismiss?()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to end the translation session?")
         }
     }
 
@@ -251,6 +287,30 @@ public struct ZumuTranslatorView: View {
         }
     }
 
+    // MARK: - Close Button
+
+    private var closeButton: some View {
+        Button(action: handleCloseAction) {
+            ZStack {
+                // Background blur
+                Circle()
+                    .fill(Color.black.opacity(0.3))
+                    .frame(width: 44, height: 44)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+                    .blur(radius: 0.5)
+
+                // Icon
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.9))
+            }
+        }
+        .shadow(color: .black.opacity(0.3), radius: 8)
+    }
+
     // MARK: - Call Button
 
     private var callButton: some View {
@@ -405,6 +465,16 @@ public struct ZumuTranslatorView: View {
 
     // MARK: - Actions
 
+    private func handleCloseAction() {
+        if translator.state == .active {
+            // Show confirmation if session is active
+            showingCloseConfirmation = true
+        } else {
+            // Dismiss immediately if not in session
+            onDismiss?()
+        }
+    }
+
     private func handleCallAction() {
         switch translator.state {
         case .idle, .disconnected, .error:
@@ -456,7 +526,10 @@ struct ZumuTranslatorView_Previews: PreviewProvider {
                 tripId: "TRIP-12345",
                 pickupLocation: "123 Main St",
                 dropoffLocation: "456 Oak Ave"
-            )
+            ),
+            onDismiss: {
+                print("Translator dismissed")
+            }
         )
     }
 }

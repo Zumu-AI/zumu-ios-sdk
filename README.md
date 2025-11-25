@@ -56,6 +56,7 @@ The easiest way to add translation to your app - just drop in the view!
 
 #### 2. Add the View to Your App
 
+**Basic Usage:**
 ```swift
 import SwiftUI
 import ZumuTranslator
@@ -76,9 +77,38 @@ struct ContentView: View {
 }
 ```
 
+**With Navigation (Recommended):**
+```swift
+struct ContentView: View {
+    @State private var showingTranslator = false
+
+    var body: some View {
+        Button("Start Translation") {
+            showingTranslator = true
+        }
+        .fullScreenCover(isPresented: $showingTranslator) {
+            ZumuTranslatorView(
+                apiKey: "zumu_your_api_key_here",
+                config: SessionConfig(
+                    driverName: "John Doe",
+                    driverLanguage: "English",
+                    passengerName: "María García",
+                    passengerLanguage: "Spanish",
+                    tripId: "TRIP-12345"
+                ),
+                onDismiss: {
+                    showingTranslator = false
+                }
+            )
+        }
+    }
+}
+```
+
 That's it! You now have a fully functional translation UI with:
 - ✅ Animated audio visualization orb
-- ✅ Glassmorphic call button
+- ✅ Glassmorphic call button with animations
+- ✅ Close button (top-left) with confirmation alert
 - ✅ Connection status indicators
 - ✅ Session info display
 - ✅ Automatic error handling and retry

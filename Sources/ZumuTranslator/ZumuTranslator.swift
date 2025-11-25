@@ -254,22 +254,17 @@ public class ZumuTranslator: ObservableObject {
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
 
-        // Verify connection is established by sending a ping
-        do {
-            try await webSocketTask?.sendPing { error in
-                if let error = error {
-                    print("WebSocket ping failed: \(error)")
-                }
-            }
-        } catch {
-            webSocketTask?.cancel(with: .goingAway, reason: nil)
-            webSocketTask = nil
-            throw ZumuError.networkError("Failed to establish WebSocket connection: \(error.localizedDescription)")
-        }
-
-        // Start receiving messages
+        // Start receiving messages immediately
         Task {
             await receiveWebSocketMessages()
+        }
+
+        // Give WebSocket a moment to establish connection
+        try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
+        // Verify connection by checking if task is still active
+        guard webSocketTask != nil else {
+            throw ZumuError.networkError("WebSocket connection failed to establish")
         }
     }
 
