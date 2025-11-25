@@ -45,6 +45,8 @@ public class ZumuTranslator: ObservableObject {
     private var createdSession: TranslationSession?
     private var lastPingTime: Date?
     private var latencyMeasurements: [Int] = []
+    private var isWebSocketConnected: Bool = false
+    private var audioSendErrorCount: Int = 0
 
     // MARK: - Initialization
 
@@ -114,6 +116,7 @@ public class ZumuTranslator: ObservableObject {
             // Clean up WebSocket if it was created
             webSocketTask?.cancel(with: .goingAway, reason: nil)
             webSocketTask = nil
+            isWebSocketConnected = false
 
             // Clean up audio if it was initialized
             stopAudioCapture()
@@ -148,6 +151,8 @@ public class ZumuTranslator: ObservableObject {
         connectionQuality = nil
         latencyMeasurements = []
         lastPingTime = nil
+        isWebSocketConnected = false
+        audioSendErrorCount = 0
     }
 
     /// Attempt to reconnect to the session
@@ -172,6 +177,7 @@ public class ZumuTranslator: ObservableObject {
             // Clean up previous connection
             webSocketTask?.cancel(with: .goingAway, reason: nil)
             webSocketTask = nil
+            isWebSocketConnected = false
             stopAudioCapture()
 
             // Reset to idle to allow startSession to work
@@ -229,6 +235,8 @@ public class ZumuTranslator: ObservableObject {
         self.connectionQuality = nil
         self.latencyMeasurements = []
         self.lastPingTime = nil
+        self.isWebSocketConnected = false
+        self.audioSendErrorCount = 0
         state = .idle
     }
 
@@ -347,7 +355,11 @@ public class ZumuTranslator: ObservableObject {
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
 
-        print("🔌 WebSocket connected, sending initial handshake...")
+        print("🔌 WebSocket connecting to \(url.host ?? "unknown")...")
+
+        await MainActor.run {
+            self.isWebSocketConnected = false  // Not fully connected until handshake completes
+        }
 
         // Send initial handshake with agent variables (CRITICAL for ElevenLabs)
         let handshake: [String: Any] = [
@@ -366,8 +378,14 @@ public class ZumuTranslator: ObservableObject {
             try await webSocketTask?.send(.data(handshakeData))
             print("✅ Handshake sent successfully")
         } catch {
+            let nsError = error as NSError
+            print("❌ Failed to send handshake - Error domain: \(nsError.domain), code: \(nsError.code)")
+            print("   \(error.localizedDescription)")
             webSocketTask?.cancel(with: .goingAway, reason: nil)
             webSocketTask = nil
+            await MainActor.run {
+                self.isWebSocketConnected = false
+            }
             throw ZumuError.networkError("Failed to send WebSocket handshake: \(error.localizedDescription)")
         }
 
@@ -437,8 +455,14 @@ public class ZumuTranslator: ObservableObject {
                 }
             } catch {
                 // WebSocket disconnected - attempt automatic reconnection
+                let nsError = error as NSError
                 print("❌ WebSocket error: \(error.localizedDescription)")
+                print("   Error domain: \(nsError.domain), code: \(nsError.code)")
+
                 await MainActor.run {
+                    // Mark as disconnected
+                    self.isWebSocketConnected = false
+
                     // Only handle reconnection if we were in an active session
                     // If we were connecting, the error will be caught by startSession
                     if self.state == .active {
@@ -477,9 +501,22 @@ public class ZumuTranslator: ObservableObject {
 
             // Handshake acknowledgment
             if type == "conversation_initiation_metadata" {
-                print("✅ Connection established")
+                print("✅ WebSocket handshake completed - connection fully established")
                 await MainActor.run {
+                    self.isWebSocketConnected = true
                     self.agentState = .listening
+                    self.audioSendErrorCount = 0
+                }
+                return
+            }
+
+            // Error messages from server
+            if type == "error" {
+                let errorMsg = json["message"] as? String ?? "Unknown error"
+                let errorCode = json["code"] as? String ?? "unknown"
+                print("❌ Server error [\(errorCode)]: \(errorMsg)")
+                await MainActor.run {
+                    self.state = .error("Server error: \(errorMsg)")
                 }
                 return
             }
@@ -679,7 +716,15 @@ public class ZumuTranslator: ObservableObject {
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, time in
-            guard let self = self, let webSocketTask = self.webSocketTask, !self.isMuted else { return }
+            guard let self = self else { return }
+
+            // Check if we should send audio (WebSocket connected, not muted, in active state)
+            guard self.isWebSocketConnected,
+                  !self.isMuted,
+                  self.state == .active,
+                  let webSocketTask = self.webSocketTask else {
+                return
+            }
 
             // Convert audio buffer to PCM data
             let audioData = self.bufferToData(buffer: buffer)
@@ -698,8 +743,34 @@ public class ZumuTranslator: ObservableObject {
                 do {
                     let jsonData = try JSONSerialization.data(withJSONObject: message)
                     try await webSocketTask.send(.data(jsonData))
+
+                    // Reset error count on successful send
+                    await MainActor.run {
+                        self.audioSendErrorCount = 0
+                    }
                 } catch {
-                    print("⚠️ Failed to send audio: \(error.localizedDescription)")
+                    await MainActor.run {
+                        self.audioSendErrorCount += 1
+
+                        // Log detailed error information
+                        let nsError = error as NSError
+                        print("⚠️ Failed to send audio (attempt \(self.audioSendErrorCount)): \(error.localizedDescription)")
+                        print("   Error domain: \(nsError.domain), code: \(nsError.code)")
+
+                        // Mark WebSocket as disconnected if we get socket errors
+                        if nsError.domain == NSPOSIXErrorDomain ||
+                           error.localizedDescription.contains("Socket") ||
+                           error.localizedDescription.contains("canceled") {
+                            print("🔌 WebSocket appears to be disconnected - marking connection as lost")
+                            self.isWebSocketConnected = false
+
+                            // Trigger reconnection if we have multiple consecutive failures
+                            if self.audioSendErrorCount >= 3 && self.state == .active {
+                                print("❌ Multiple consecutive audio send failures - triggering reconnection")
+                                self.state = .disconnected
+                            }
+                        }
+                    }
                 }
             }
         }
