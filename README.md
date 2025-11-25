@@ -519,6 +519,35 @@ NotificationCenter.default.addObserver(
 - Check that device isn't muted
 - Ensure AirPods/Bluetooth devices are connected properly
 
+## Testing
+
+The SDK includes comprehensive integration tests that validate functionality before release.
+
+### Running Tests
+```bash
+# Run all tests
+swift test
+
+# Run with custom API key
+export ZUMU_TEST_API_KEY="zumu_your_test_key_here"
+swift test
+
+# Run in Xcode
+open Package.swift
+# Then press ⌘+U
+```
+
+### Test Coverage
+- ✅ WebSocket connection stability (5+ seconds)
+- ✅ Session creation and reconnection
+- ✅ Audio mute/unmute functionality
+- ✅ State machine transitions
+- ✅ Error handling (invalid keys, empty configs)
+- ✅ Trade secret protection
+- ✅ Performance benchmarks
+
+See [Tests/README.md](Tests/README.md) for detailed testing documentation.
+
 ## Support
 
 - Documentation: https://translator.zumu.ai/docs
