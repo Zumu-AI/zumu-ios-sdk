@@ -85,6 +85,13 @@ public class ZumuTranslator: ObservableObject {
             return session
 
         } catch {
+            // Clean up WebSocket if it was created
+            webSocketTask?.cancel(with: .goingAway, reason: nil)
+            webSocketTask = nil
+
+            // Clean up audio if it was initialized
+            stopAudioCapture()
+
             // Clean up partial session if created
             if let session = createdSession {
                 try? await updateSessionStatus(sessionId: session.id, status: "failed")
@@ -93,7 +100,13 @@ public class ZumuTranslator: ObservableObject {
             // Reset to idle to allow retry (enterprise-grade error recovery)
             state = .idle
             self.session = nil
-            throw error
+
+            // Provide more detailed error context
+            if let networkError = error as? ZumuError {
+                throw networkError
+            } else {
+                throw ZumuError.networkError("Session start failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -241,6 +254,19 @@ public class ZumuTranslator: ObservableObject {
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
 
+        // Verify connection is established by sending a ping
+        do {
+            try await webSocketTask?.sendPing { error in
+                if let error = error {
+                    print("WebSocket ping failed: \(error)")
+                }
+            }
+        } catch {
+            webSocketTask?.cancel(with: .goingAway, reason: nil)
+            webSocketTask = nil
+            throw ZumuError.networkError("Failed to establish WebSocket connection: \(error.localizedDescription)")
+        }
+
         // Start receiving messages
         Task {
             await receiveWebSocketMessages()
@@ -276,8 +302,24 @@ public class ZumuTranslator: ObservableObject {
                     break
                 }
             } catch {
+                // WebSocket disconnected - reset to idle for automatic retry capability
                 await MainActor.run {
-                    self.state = .disconnected
+                    // Only transition to disconnected if we were active
+                    // If we were connecting, the error will be caught by startSession
+                    if self.state == .active {
+                        print("WebSocket connection lost: \(error.localizedDescription)")
+                        self.state = .disconnected
+
+                        // Auto-reset to idle after a brief moment to allow retry
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                            if self.state == .disconnected {
+                                self.state = .idle
+                                self.session = nil
+                                self.webSocketTask = nil
+                            }
+                        }
+                    }
                 }
                 break
             }
@@ -285,13 +327,47 @@ public class ZumuTranslator: ObservableObject {
     }
 
     private func setupAudioCapture() async throws {
-        audioSession = AVAudioSession.sharedInstance()
-        try audioSession?.setCategory(.playAndRecord, mode: .default)
-        try audioSession?.setActive(true)
+        do {
+            audioSession = AVAudioSession.sharedInstance()
 
-        audioEngine = AVAudioEngine()
-        setupAudioTap()
-        try audioEngine?.start()
+            // Configure audio session with retry on failure
+            var retryCount = 0
+            while retryCount < 3 {
+                do {
+                    try audioSession?.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+                    try audioSession?.setActive(true, options: [.notifyOthersOnDeactivation])
+                    break
+                } catch {
+                    retryCount += 1
+                    if retryCount >= 3 {
+                        throw error
+                    }
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                }
+            }
+
+            audioEngine = AVAudioEngine()
+            setupAudioTap()
+
+            // Start audio engine with retry
+            retryCount = 0
+            while retryCount < 3 {
+                do {
+                    try audioEngine?.start()
+                    break
+                } catch {
+                    retryCount += 1
+                    if retryCount >= 3 {
+                        throw error
+                    }
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                }
+            }
+        } catch {
+            // Clean up on audio setup failure
+            stopAudioCapture()
+            throw ZumuError.networkError("Failed to initialize audio: \(error.localizedDescription)")
+        }
     }
 
     private func setupAudioTap() {
