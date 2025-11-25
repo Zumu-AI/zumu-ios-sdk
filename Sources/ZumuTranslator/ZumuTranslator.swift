@@ -542,19 +542,24 @@ public class ZumuTranslator: ObservableObject {
 
             // Handshake acknowledgment
             if type == "conversation_initiation_metadata" {
-                print("✅ WebSocket handshake completed - allowing connection to stabilize...")
+                print("✅ WebSocket handshake completed - enabling audio with stabilization delay...")
 
-                // Give the underlying TCP connection a moment to fully stabilize
-                // before enabling audio transmission (prevents "Socket is not connected" errors)
-                try? await Task.sleep(nanoseconds: 500_000_000) // 500ms settling period
+                // Enable audio in a separate Task after a brief delay
+                // This keeps the receive loop active to prevent connection timeout
+                Task {
+                    // Give the connection a moment to stabilize
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
 
-                await MainActor.run {
-                    self.isWebSocketConnected = true
-                    self.agentState = .listening
-                    self.audioSendErrorCount = 0
+                    await MainActor.run {
+                        self.isWebSocketConnected = true
+                        self.agentState = .listening
+                        self.audioSendErrorCount = 0
+                    }
+
+                    print("🎤 Audio transmission enabled after stabilization period")
                 }
 
-                print("🎤 Connection fully stabilized - audio transmission enabled")
+                // Don't block the receive loop - let it continue processing messages
                 return
             }
 
