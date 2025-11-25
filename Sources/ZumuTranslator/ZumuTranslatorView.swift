@@ -125,13 +125,28 @@ public struct ZumuTranslatorView: View {
                             .font(.system(size: 16, weight: .medium))
                     }
                 case .active:
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 8, height: 8)
-                        Text("Connected")
-                            .foregroundColor(.green)
-                            .font(.system(size: 16, weight: .semibold))
+                    VStack(spacing: 4) {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(agentStateColor)
+                                .frame(width: 8, height: 8)
+                                .scaleEffect(translator.agentState == .speaking ? 1.2 : 1.0)
+                                .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: translator.agentState == .speaking)
+                            Text(agentStateText)
+                                .foregroundColor(agentStateColor)
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+
+                        // Connection quality indicator
+                        if let quality = translator.connectionQuality {
+                            HStack(spacing: 4) {
+                                connectionQualityIcon(quality.quality)
+                                    .font(.system(size: 10))
+                                Text("\(quality.latencyMs ?? 0)ms")
+                                    .foregroundColor(.white.opacity(0.5))
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                        }
                     }
                 case .disconnected:
                     Text("Disconnected - Tap to reconnect")
@@ -514,6 +529,55 @@ public struct ZumuTranslatorView: View {
 
     private var isActive: Bool {
         translator.state == .active
+    }
+
+    private var agentStateText: String {
+        switch translator.agentState {
+        case .idle:
+            return "Ready"
+        case .listening:
+            return "Listening..."
+        case .processing:
+            return "Processing..."
+        case .thinking:
+            return "Thinking..."
+        case .speaking:
+            return "Translating..."
+        }
+    }
+
+    private var agentStateColor: Color {
+        switch translator.agentState {
+        case .idle:
+            return .gray
+        case .listening:
+            return .green
+        case .processing:
+            return .blue
+        case .thinking:
+            return .purple
+        case .speaking:
+            return .orange
+        }
+    }
+
+    private func connectionQualityIcon(_ quality: ConnectionQuality.Quality) -> some View {
+        Group {
+            switch quality {
+            case .excellent:
+                Image(systemName: "wifi")
+                    .foregroundColor(.green)
+            case .good:
+                Image(systemName: "wifi")
+                    .foregroundColor(.blue)
+            case .fair:
+                Image(systemName: "wifi")
+                    .foregroundColor(.orange)
+            case .poor:
+                Image(systemName: "wifi.exclamationmark")
+                    .foregroundColor(.red)
+            }
+        }
     }
 }
 

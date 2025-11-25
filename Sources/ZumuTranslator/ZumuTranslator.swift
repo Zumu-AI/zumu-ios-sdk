@@ -12,6 +12,9 @@ public class ZumuTranslator: ObservableObject {
     /// Current session state
     @Published public private(set) var state: SessionState = .idle
 
+    /// Current agent state (what the agent is doing)
+    @Published public private(set) var agentState: AgentState = .idle
+
     /// Current conversation messages
     @Published public private(set) var messages: [TranslationMessage] = []
 
@@ -20,6 +23,9 @@ public class ZumuTranslator: ObservableObject {
 
     /// Active translation session
     @Published public private(set) var session: TranslationSession?
+
+    /// Connection quality metrics
+    @Published public private(set) var connectionQuality: ConnectionQuality?
 
     // MARK: - Private Properties
 
@@ -33,6 +39,12 @@ public class ZumuTranslator: ObservableObject {
     private var audioPlayer: AVAudioPlayer?
     private var audioQueue: [Data] = []
     private var isPlayingAudio: Bool = false
+    private var reconnectionAttempts: Int = 0
+    private var maxReconnectionAttempts: Int = 3
+    private var lastSessionConfig: SessionConfig?
+    private var createdSession: TranslationSession?
+    private var lastPingTime: Date?
+    private var latencyMeasurements: [Int] = []
 
     // MARK: - Initialization
 
@@ -69,11 +81,15 @@ public class ZumuTranslator: ObservableObject {
         state = .connecting
         var createdSession: TranslationSession?
 
+        // Store config for potential reconnection
+        lastSessionConfig = config
+
         do {
             // Step 1: Create session on Zumu backend
             let session = try await createBackendSession(config: config)
             createdSession = session
             self.session = session
+            self.createdSession = session
 
             // Step 2: Set up audio capture FIRST (before WebSocket)
             // This ensures we're ready to stream audio immediately after connection
@@ -88,6 +104,10 @@ public class ZumuTranslator: ObservableObject {
             try await connectWebSocket(signedUrl: conversationData.signedUrl, context: conversationData.context)
 
             state = .active
+
+            // Reset reconnection attempts on successful connection
+            reconnectionAttempts = 0
+
             return session
 
         } catch {
@@ -124,6 +144,56 @@ public class ZumuTranslator: ObservableObject {
         session = nil
         messages = []
         isStarting = false
+        reconnectionAttempts = 0
+        connectionQuality = nil
+        latencyMeasurements = []
+        lastPingTime = nil
+    }
+
+    /// Attempt to reconnect to the session
+    /// - Returns: True if reconnection was successful
+    @MainActor
+    private func attemptReconnection() async -> Bool {
+        guard let config = lastSessionConfig,
+              let session = createdSession,
+              reconnectionAttempts < maxReconnectionAttempts else {
+            print("❌ Reconnection not possible: no config or max attempts reached")
+            return false
+        }
+
+        reconnectionAttempts += 1
+        print("🔄 Attempting reconnection (\(reconnectionAttempts)/\(maxReconnectionAttempts))...")
+
+        // Exponential backoff: 1s, 2s, 4s
+        let backoffDelay = UInt64(pow(2.0, Double(reconnectionAttempts - 1)) * 1_000_000_000)
+        try? await Task.sleep(nanoseconds: backoffDelay)
+
+        do {
+            // Clean up previous connection
+            webSocketTask?.cancel(with: .goingAway, reason: nil)
+            webSocketTask = nil
+            stopAudioCapture()
+
+            // Reset to idle to allow startSession to work
+            state = .idle
+            self.session = nil
+
+            // Attempt to reconnect with same config
+            _ = try await startSession(config: config)
+            print("✅ Reconnection successful!")
+            return true
+
+        } catch {
+            print("⚠️ Reconnection attempt \(reconnectionAttempts) failed: \(error.localizedDescription)")
+
+            if reconnectionAttempts >= maxReconnectionAttempts {
+                print("❌ Max reconnection attempts reached, giving up")
+                state = .error("Connection lost. Please try again.")
+                return false
+            }
+
+            return false
+        }
     }
 
     /// End the current translation session
@@ -149,9 +219,16 @@ public class ZumuTranslator: ObservableObject {
             // Continue anyway - WebSocket and audio are already closed
         }
 
-        // Reset state
+        // Reset state and reconnection tracking (user intentionally ended session)
         self.session = nil
         self.messages = []
+        self.reconnectionAttempts = 0
+        self.lastSessionConfig = nil
+        self.createdSession = nil
+        self.agentState = .idle
+        self.connectionQuality = nil
+        self.latencyMeasurements = []
+        self.lastPingTime = nil
         state = .idle
     }
 
@@ -299,6 +376,11 @@ public class ZumuTranslator: ObservableObject {
             await receiveWebSocketMessages()
         }
 
+        // Start connection quality monitoring
+        Task {
+            await monitorConnectionQuality()
+        }
+
         // Give server time to acknowledge handshake
         try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
 
@@ -308,6 +390,31 @@ public class ZumuTranslator: ObservableObject {
         }
 
         print("✅ WebSocket connection established and stable")
+    }
+
+    private func monitorConnectionQuality() async {
+        // Send ping every 5 seconds to measure latency
+        while let task = webSocketTask, state == .active || state == .connecting {
+            do {
+                // Record ping time
+                await MainActor.run {
+                    self.lastPingTime = Date()
+                }
+
+                // Send ping
+                let ping: [String: String] = ["type": "ping"]
+                let pingData = try JSONSerialization.data(withJSONObject: ping)
+                try await task.send(.data(pingData))
+                print("📡 Sent ping for latency measurement")
+
+                // Wait 5 seconds before next ping
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+
+            } catch {
+                print("⚠️ Failed to send ping: \(error.localizedDescription)")
+                break
+            }
+        }
     }
 
     private func receiveWebSocketMessages() async {
@@ -329,20 +436,25 @@ public class ZumuTranslator: ObservableObject {
                     break
                 }
             } catch {
-                // WebSocket disconnected - reset to idle for automatic retry capability
+                // WebSocket disconnected - attempt automatic reconnection
                 print("❌ WebSocket error: \(error.localizedDescription)")
                 await MainActor.run {
-                    // Only transition to disconnected if we were active
+                    // Only handle reconnection if we were in an active session
                     // If we were connecting, the error will be caught by startSession
                     if self.state == .active {
-                        print("WebSocket connection lost during active session")
+                        print("⚠️ WebSocket connection lost during active session")
                         self.state = .disconnected
+                        self.agentState = .idle
 
-                        // Auto-reset to idle after a brief moment to allow retry
+                        // Attempt automatic reconnection
                         Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-                            if self.state == .disconnected {
-                                self.state = .idle
+                            let reconnected = await self.attemptReconnection()
+
+                            if !reconnected {
+                                // Reconnection failed - transition to error state
+                                if self.state != .error("Connection lost. Please try again.") {
+                                    self.state = .error("Connection lost after \(self.reconnectionAttempts) attempts")
+                                }
                                 self.session = nil
                                 self.webSocketTask = nil
                             }
@@ -366,32 +478,47 @@ public class ZumuTranslator: ObservableObject {
             // Handshake acknowledgment
             if type == "conversation_initiation_metadata" {
                 print("✅ Connection established")
+                await MainActor.run {
+                    self.agentState = .listening
+                }
                 return
             }
 
-            // Audio from agent
+            // Audio from agent - agent is speaking
             if type == "audio" || type == "agent_audio_chunk" {
                 if let audioBase64 = json["audio"] as? String,
                    let audioData = Data(base64Encoded: audioBase64) {
                     print("🔊 Playing agent audio (\(audioData.count) bytes)")
+                    await MainActor.run {
+                        self.agentState = .speaking
+                    }
                     await playAudioChunk(audioData)
                 }
                 return
             }
 
-            // User transcript
+            // User transcript - user finished speaking, agent will process
             if type == "user_transcript" {
                 if let transcript = json["transcript"] as? String {
                     let msg = TranslationMessage(role: "user", content: transcript)
                     await MainActor.run {
                         self.messages.append(msg)
+                        self.agentState = .thinking
                         print("👤 User: \(transcript)")
                     }
                 }
                 return
             }
 
-            // Agent response
+            // Tentative user transcript - user is speaking
+            if type == "tentative_user_transcript" {
+                await MainActor.run {
+                    self.agentState = .processing
+                }
+                return
+            }
+
+            // Agent response - agent formulated response, about to speak
             if type == "agent_response" {
                 if let response = json["response"] as? String {
                     let msg = TranslationMessage(role: "agent", content: response)
@@ -403,21 +530,50 @@ public class ZumuTranslator: ObservableObject {
                 return
             }
 
-            // Interruption
+            // Interruption - user spoke while agent was speaking
             if type == "interruption" {
                 print("⚠️ Interrupted")
                 await MainActor.run {
                     self.audioQueue.removeAll()
+                    self.audioPlayer?.stop()
+                    self.agentState = .processing
                 }
                 return
             }
 
             // Ping/pong for connection health
             if type == "ping" {
+                // Server sent ping, respond with pong
                 Task {
                     let pong: [String: String] = ["type": "pong"]
                     if let pongData = try? JSONSerialization.data(withJSONObject: pong) {
                         try? await self.webSocketTask?.send(.data(pongData))
+                    }
+                }
+                return
+            }
+
+            // Pong response - calculate latency
+            if type == "pong" {
+                await MainActor.run {
+                    if let pingTime = self.lastPingTime {
+                        let latencyMs = Int(Date().timeIntervalSince(pingTime) * 1000)
+                        print("📊 Latency: \(latencyMs)ms")
+
+                        // Keep last 10 measurements for averaging
+                        self.latencyMeasurements.append(latencyMs)
+                        if self.latencyMeasurements.count > 10 {
+                            self.latencyMeasurements.removeFirst()
+                        }
+
+                        // Calculate average latency
+                        let avgLatency = self.latencyMeasurements.reduce(0, +) / self.latencyMeasurements.count
+
+                        // Update connection quality
+                        self.connectionQuality = ConnectionQuality(latencyMs: avgLatency)
+                        print("📊 Average latency: \(avgLatency)ms - Quality: \(self.connectionQuality?.quality.rawValue ?? "unknown")")
+
+                        self.lastPingTime = nil
                     }
                 }
                 return
@@ -465,6 +621,10 @@ public class ZumuTranslator: ObservableObject {
 
         await MainActor.run {
             self.isPlayingAudio = false
+            // Return to listening state after agent finishes speaking
+            if self.state == .active {
+                self.agentState = .listening
+            }
         }
     }
 
@@ -592,6 +752,52 @@ public enum SessionState: Equatable {
     case disconnected
     case ending
     case error(String)
+}
+
+// MARK: - Agent State
+
+/// Represents what the agent is currently doing
+public enum AgentState: Equatable {
+    case idle           // No active session
+    case listening      // Agent is listening to user
+    case processing     // Processing user speech (transcribing)
+    case thinking       // Agent is formulating response
+    case speaking       // Agent is responding/translating
+}
+
+// MARK: - Connection Quality
+
+/// Connection quality metrics
+public struct ConnectionQuality: Equatable {
+    public let latencyMs: Int?
+    public let packetsLost: Int?
+    public let quality: Quality
+
+    public enum Quality: String {
+        case excellent = "excellent"  // < 100ms
+        case good = "good"            // 100-300ms
+        case fair = "fair"            // 300-500ms
+        case poor = "poor"            // > 500ms
+    }
+
+    public init(latencyMs: Int?, packetsLost: Int? = nil) {
+        self.latencyMs = latencyMs
+        self.packetsLost = packetsLost
+
+        if let latency = latencyMs {
+            if latency < 100 {
+                self.quality = .excellent
+            } else if latency < 300 {
+                self.quality = .good
+            } else if latency < 500 {
+                self.quality = .fair
+            } else {
+                self.quality = .poor
+            }
+        } else {
+            self.quality = .good
+        }
+    }
 }
 
 // MARK: - Models
