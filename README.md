@@ -4,6 +4,7 @@ Enterprise-grade real-time translation SDK for driver-passenger conversations.
 
 ## Features
 
+- 🎨 **Ready-to-Use UI**: Drop-in SwiftUI component with beautiful design
 - 🎯 **Real-time Translation**: Instant voice-to-voice translation
 - 🔐 **Secure Authentication**: API key-based authentication
 - 📱 **SwiftUI Integration**: Reactive state management with Combine
@@ -11,6 +12,7 @@ Enterprise-grade real-time translation SDK for driver-passenger conversations.
 - 💬 **Text Messaging**: Send text messages alongside voice
 - 📊 **Session Management**: Track and manage conversation sessions
 - 🔄 **Automatic Reconnection**: Built-in connection resilience
+- 🎨 **Enterprise-Grade UI**: Animated orb visualization, glassmorphic buttons
 
 ## Requirements
 
@@ -39,7 +41,11 @@ Or add it in Xcode:
 
 ## Quick Start
 
-### 1. Get Your API Key
+### Option 1: Ready-to-Use UI Component (Recommended)
+
+The easiest way to add translation to your app - just drop in the view!
+
+#### 1. Get Your API Key
 
 1. Log in to the [Zumu Dashboard](https://translator.zumu.ai/dashboard)
 2. Navigate to **API Keys**
@@ -48,7 +54,40 @@ Or add it in Xcode:
 
 ⚠️ **Important**: Never commit API keys to your repository. Store them securely.
 
-### 2. Initialize the SDK
+#### 2. Add the View to Your App
+
+```swift
+import SwiftUI
+import ZumuTranslator
+
+struct ContentView: View {
+    var body: some View {
+        ZumuTranslatorView(
+            apiKey: "zumu_your_api_key_here",
+            config: SessionConfig(
+                driverName: "John Doe",
+                driverLanguage: "English",
+                passengerName: "María García",
+                passengerLanguage: "Spanish",
+                tripId: "TRIP-12345"
+            )
+        )
+    }
+}
+```
+
+That's it! You now have a fully functional translation UI with:
+- ✅ Animated audio visualization orb
+- ✅ Glassmorphic call button
+- ✅ Connection status indicators
+- ✅ Session info display
+- ✅ Automatic error handling and retry
+
+### Option 2: Headless SDK (Advanced)
+
+For custom UI implementations, use the SDK without the UI component.
+
+#### 1. Initialize the SDK
 
 ```swift
 import ZumuTranslator
@@ -56,7 +95,7 @@ import ZumuTranslator
 let translator = ZumuTranslator(apiKey: "zumu_your_api_key_here")
 ```
 
-### 3. Start a Translation Session
+#### 2. Start a Translation Session
 
 ```swift
 let config = SessionConfig(
@@ -79,7 +118,7 @@ Task {
 }
 ```
 
-### 4. Build Your UI
+#### 3. Build Your Custom UI
 
 ```swift
 import SwiftUI
