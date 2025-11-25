@@ -355,7 +355,8 @@ public class ZumuTranslator: ObservableObject {
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
 
-        print("🔌 WebSocket connecting to \(url.host ?? "unknown")...")
+        // IMPORTANT: Never log the host to protect trade secrets
+        print("🔌 Establishing secure WebSocket connection...")
 
         await MainActor.run {
             self.isWebSocketConnected = false  // Not fully connected until handshake completes
@@ -411,9 +412,19 @@ public class ZumuTranslator: ObservableObject {
     }
 
     private func monitorConnectionQuality() async {
-        // Send ping every 5 seconds to measure latency
-        while let task = webSocketTask, state == .active || state == .connecting {
+        // Wait for handshake to fully complete before starting pings
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+
+        // Send ping every 10 seconds to measure latency
+        while let task = webSocketTask, state == .active {
             do {
+                // Only ping if we're actually connected
+                guard await MainActor.run(body: { self.isWebSocketConnected }) else {
+                    print("📡 Skipping ping - WebSocket not connected")
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // Wait 1s and check again
+                    continue
+                }
+
                 // Record ping time
                 await MainActor.run {
                     self.lastPingTime = Date()
@@ -425,14 +436,22 @@ public class ZumuTranslator: ObservableObject {
                 try await task.send(.data(pingData))
                 print("📡 Sent ping for latency measurement")
 
-                // Wait 5 seconds before next ping
-                try await Task.sleep(nanoseconds: 5_000_000_000)
+                // Wait 10 seconds before next ping (longer interval to reduce overhead)
+                try await Task.sleep(nanoseconds: 10_000_000_000)
 
             } catch {
+                let nsError = error as NSError
                 print("⚠️ Failed to send ping: \(error.localizedDescription)")
+                print("   Error domain: \(nsError.domain), code: \(nsError.code)")
+
+                // Mark as disconnected
+                await MainActor.run {
+                    self.isWebSocketConnected = false
+                }
                 break
             }
         }
+        print("📡 Connection quality monitor stopped")
     }
 
     private func receiveWebSocketMessages() async {
