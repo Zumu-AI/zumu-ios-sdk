@@ -84,7 +84,10 @@ public struct ZumuTranslatorView: View {
                     if translator.state == .active {
                         await translator.endSession()
                     }
-                    onDismiss?()
+                    // Ensure dismiss happens on main thread
+                    await MainActor.run {
+                        onDismiss?()
+                    }
                 }
             }
         } message: {
@@ -470,8 +473,10 @@ public struct ZumuTranslatorView: View {
             // Show confirmation if session is active
             showingCloseConfirmation = true
         } else {
-            // Dismiss immediately if not in session
-            onDismiss?()
+            // Dismiss immediately if not in session (ensure main thread)
+            Task { @MainActor in
+                onDismiss?()
+            }
         }
     }
 
