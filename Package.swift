@@ -14,12 +14,14 @@ let package = Package(
         ),
     ],
     dependencies: [
-        // No external dependencies - pure Swift SDK
+        .package(url: "https://github.com/livekit/client-sdk-swift", from: "2.0.0")
     ],
     targets: [
         .target(
             name: "ZumuTranslator",
-            dependencies: [],
+            dependencies: [
+                .product(name: "LiveKit", package: "client-sdk-swift")
+            ],
             path: "Sources/ZumuTranslator"
         ),
         .testTarget(
