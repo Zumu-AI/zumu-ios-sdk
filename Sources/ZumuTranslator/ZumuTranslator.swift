@@ -366,15 +366,29 @@ public class ZumuTranslator: ObservableObject {
         //     await monitorConnectionQuality()
         // }
 
-        // Give server time to acknowledge handshake
-        try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        // Wait for handshake acknowledgment with timeout
+        let startTime = Date()
+        let timeout: TimeInterval = 5.0 // 5 seconds max wait
 
-        // Verify connection is still active
-        guard webSocketTask != nil else {
-            throw ZumuError.networkError("WebSocket connection failed after handshake")
+        while !await MainActor.run(body: { self.isWebSocketConnected }) {
+            // Check if timed out
+            if Date().timeIntervalSince(startTime) > timeout {
+                await MainActor.run {
+                    self.isWebSocketConnected = false
+                }
+                throw ZumuError.networkError("WebSocket handshake timeout - no acknowledgment received")
+            }
+
+            // Check if socket died
+            guard webSocketTask != nil else {
+                throw ZumuError.networkError("WebSocket connection lost before handshake")
+            }
+
+            // Wait a bit before checking again
+            try await Task.sleep(nanoseconds: 100_000_000) // 100ms
         }
 
-        print("✅ WebSocket connection established and ready")
+        print("✅ WebSocket handshake acknowledged - connection ready")
     }
 
     private func monitorConnectionQuality() async {
@@ -497,24 +511,16 @@ public class ZumuTranslator: ObservableObject {
 
             // Handshake acknowledgment
             if type == "conversation_initiation_metadata" {
-                print("✅ WebSocket handshake completed - enabling audio with stabilization delay...")
+                print("✅ WebSocket handshake completed - enabling audio immediately...")
 
-                // Enable audio in a separate Task after a brief delay
-                // This keeps the receive loop active to prevent connection timeout
-                Task {
-                    // Give the connection a moment to stabilize
-                    try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
-
-                    await MainActor.run {
-                        self.isWebSocketConnected = true
-                        self.agentState = .listening
-                        self.audioSendErrorCount = 0
-                    }
-
-                    print("🎤 Audio transmission enabled after stabilization period")
+                // Enable audio immediately (no artificial delay)
+                await MainActor.run {
+                    self.isWebSocketConnected = true
+                    self.agentState = .listening
+                    self.audioSendErrorCount = 0
                 }
 
-                // Don't block the receive loop - let it continue processing messages
+                print("🎤 Audio transmission enabled - ready to stream")
                 return
             }
 
