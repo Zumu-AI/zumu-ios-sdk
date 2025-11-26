@@ -515,10 +515,19 @@ public struct ZumuTranslatorView: View {
 
     private var languageDetectionBadge: some View {
         HStack(spacing: 8) {
-            Image(systemName: "globe.badge.chevron.backward")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.purple)
-                .symbolEffect(.pulse, options: .repeating, value: detectedLanguage)
+            if #available(iOS 17.0, *) {
+                Image(systemName: "globe.badge.chevron.backward")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.purple)
+                    .symbolEffect(.pulse, options: .repeating, value: detectedLanguage)
+            } else {
+                // iOS 15-16 fallback: manual scale animation
+                Image(systemName: "globe.badge.chevron.backward")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.purple)
+                    .scaleEffect(detectedLanguage != nil ? 1.1 : 1.0)
+                    .animation(.easeInOut(duration: 0.3), value: detectedLanguage)
+            }
 
             if let language = detectedLanguage {
                 Text(language)
