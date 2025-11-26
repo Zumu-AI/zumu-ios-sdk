@@ -87,23 +87,23 @@ public class ZumuTranslator: ObservableObject {
         lastSessionConfig = config
 
         do {
-            // Step 1: Create session on Zumu backend
-            let session = try await createBackendSession(config: config)
+            // Step 1: Start conversation (creates session and returns WebSocket URL)
+            let conversationData = try await startConversation(config: config)
+
+            let session = TranslationSession(
+                id: conversationData.sessionId,
+                status: "active",
+                createdAt: ISO8601DateFormatter().string(from: Date())
+            )
             createdSession = session
             self.session = session
             self.createdSession = session
 
-            // Step 2: Set up audio capture FIRST (before WebSocket)
-            // This ensures we're ready to stream audio immediately after connection
-            try await setupAudioCapture()
-            print("✅ Audio capture ready")
-
-            // Step 3: Start conversation via Zumu API
-            let conversationData = try await startConversation(sessionId: session.id)
-
-            // Step 4: Connect WebSocket for real-time communication with handshake
-            // Audio is already ready, so we can start streaming immediately
+            // Step 2: Connect WebSocket for real-time communication with handshake
             try await connectWebSocket(signedUrl: conversationData.signedUrl, context: conversationData.context)
+
+            // Step 3: Set up audio capture
+            try await setupAudioCapture()
 
             state = .active
 
@@ -120,11 +120,6 @@ public class ZumuTranslator: ObservableObject {
 
             // Clean up audio if it was initialized
             stopAudioCapture()
-
-            // Clean up partial session if created
-            if let session = createdSession {
-                try? await updateSessionStatus(sessionId: session.id, status: "failed")
-            }
 
             // Reset to idle to allow retry (enterprise-grade error recovery)
             state = .idle
@@ -205,25 +200,16 @@ public class ZumuTranslator: ObservableObject {
     /// End the current translation session
     @MainActor
     public func endSession() async {
-        guard let session = session else { return }
+        guard session != nil else { return }
 
         state = .ending
 
-        // Disconnect WebSocket
+        // Disconnect WebSocket (this signals the backend that session has ended)
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
 
         // Stop audio capture
         stopAudioCapture()
-
-        // Update backend session status (best effort - don't fail if this doesn't work)
-        do {
-            try await updateSessionStatus(sessionId: session.id, status: "ended")
-            print("✅ Session status updated to 'ended'")
-        } catch {
-            print("⚠️ Failed to update session status (non-critical): \(error.localizedDescription)")
-            // Continue anyway - WebSocket and audio are already closed
-        }
 
         // Reset state and reconnection tracking (user intentionally ended session)
         self.session = nil
@@ -269,56 +255,23 @@ public class ZumuTranslator: ObservableObject {
 
     // MARK: - Private Methods
 
-    private func createBackendSession(config: SessionConfig) async throws -> TranslationSession {
-        let url = URL(string: "\(baseURL)/api/sessions")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = [
-            "driver_name": config.driverName,
-            "driver_language": config.driverLanguage,
-            "passenger_name": config.passengerName,
-            "passenger_language": config.passengerLanguage as Any,
-            "trip_id": config.tripId,
-            "pickup_location": config.pickupLocation as Any,
-            "dropoff_location": config.dropoffLocation as Any,
-            "client_info": [
-                "platform": "iOS",
-                "sdk_version": "1.0.0",
-                "device": UIDevice.current.model
-            ]
-        ]
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-            let errorBody = String(data: data, encoding: .utf8) ?? "No response body"
-            throw ZumuError.apiError("Failed to create session (HTTP \(statusCode)): \(errorBody)")
-        }
-
-        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-
-        return TranslationSession(
-            id: json["session_id"] as! String,
-            status: json["status"] as! String,
-            createdAt: json["created_at"] as! String
-        )
-    }
-
-    private func startConversation(sessionId: String) async throws -> ConversationData {
+    private func startConversation(config: SessionConfig) async throws -> ConversationData {
         let url = URL(string: "\(baseURL)/api/conversations/start")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: Any] = ["session_id": sessionId]
+        let body: [String: Any] = [
+            "session_id": config.tripId,
+            "driver_name": config.driverName,
+            "driver_language": config.driverLanguage,
+            "passenger_name": config.passengerName,
+            "passenger_language": config.passengerLanguage as Any,
+            "pickup_location": config.pickupLocation as Any,
+            "dropoff_location": config.dropoffLocation as Any
+        ]
+
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -342,6 +295,8 @@ public class ZumuTranslator: ObservableObject {
 
         return ConversationData(
             signedUrl: json["signed_url"] as! String,
+            sessionId: json["session_id"] as! String,
+            conversationId: json["conversation_id"] as? String,
             context: context
         )
     }
@@ -845,26 +800,6 @@ public class ZumuTranslator: ObservableObject {
         let audioBuffer = buffer.audioBufferList.pointee.mBuffers
         return Data(bytes: audioBuffer.mData!, count: Int(audioBuffer.mDataByteSize))
     }
-
-    private func updateSessionStatus(sessionId: String, status: String) async throws {
-        let url = URL(string: "\(baseURL)/api/sessions/\(sessionId)")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "PATCH"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = ["status": status]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-            let errorBody = String(data: data, encoding: .utf8) ?? "No response body"
-            throw ZumuError.apiError("Failed to update session (HTTP \(statusCode)): \(errorBody)")
-        }
-    }
 }
 
 // MARK: - Session State
@@ -976,6 +911,8 @@ public struct TranslationMessage: Identifiable {
 
 struct ConversationData {
     let signedUrl: String
+    let sessionId: String
+    let conversationId: String?
     let context: [String: String]
 }
 
