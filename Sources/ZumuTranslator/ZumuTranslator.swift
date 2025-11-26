@@ -370,7 +370,8 @@ public class ZumuTranslator: ObservableObject {
         let startTime = Date()
         let timeout: TimeInterval = 5.0 // 5 seconds max wait
 
-        while !await MainActor.run(body: { self.isWebSocketConnected }) {
+        var connected = await MainActor.run { self.isWebSocketConnected }
+        while !connected {
             // Check if timed out
             if Date().timeIntervalSince(startTime) > timeout {
                 await MainActor.run {
@@ -386,6 +387,9 @@ public class ZumuTranslator: ObservableObject {
 
             // Wait a bit before checking again
             try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+
+            // Re-check connection status
+            connected = await MainActor.run { self.isWebSocketConnected }
         }
 
         print("✅ WebSocket handshake acknowledged - connection ready")
