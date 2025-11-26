@@ -10,6 +10,9 @@ public struct ZumuTranslatorView: View {
     @State private var isAnimating = false
     @State private var waveformPhase: CGFloat = 0
     @State private var showingCloseConfirmation = false
+    @State private var detectedLanguage: String?
+    @State private var particlePhase: CGFloat = 0
+    @State private var meshGradientPhase: CGFloat = 0
 
     private let config: SessionConfig
     private let onDismiss: (() -> Void)?
@@ -59,9 +62,20 @@ public struct ZumuTranslatorView: View {
                 callButton
                     .frame(width: 120, height: 120)
 
+                // Live Language Detection Badge
+                if translator.state == .active {
+                    languageDetectionBadge
+                }
+
                 // Session Info
                 if translator.state == .active {
                     sessionInfoView
+                }
+
+                // Real-time transcription bubbles
+                if translator.state == .active && !translator.messages.isEmpty {
+                    transcriptionBubbles
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
                 Spacer()
@@ -253,30 +267,58 @@ public struct ZumuTranslatorView: View {
                     .opacity(isAnimating ? 0.6 : 0.3)
                     .animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: isAnimating)
 
-                // Enhanced waveform visualization (iOS 15+ compatible)
+                // Siri-style advanced waveform visualization
                 if translator.state == .active {
                     ZStack {
-                        // Multiple animated bars creating waveform effect
-                        ForEach(0..<5, id: \.self) { index in
-                            RoundedRectangle(cornerRadius: 2)
+                        // 24 bars for smooth, flowing Siri-style animation
+                        ForEach(0..<24, id: \.self) { index in
+                            RoundedRectangle(cornerRadius: 1.5)
                                 .fill(
                                     LinearGradient(
                                         colors: [
-                                            Color.white.opacity(0.8),
-                                            Color.blue.opacity(0.6),
-                                            Color.purple.opacity(0.6)
+                                            Color.white.opacity(0.9),
+                                            sirikWaveColor(for: index, agentState: translator.agentState).opacity(0.8),
+                                            sirikWaveColor(for: index, agentState: translator.agentState).opacity(0.6)
                                         ],
                                         startPoint: .top,
                                         endPoint: .bottom
                                     )
                                 )
-                                .frame(width: 4, height: waveformHeight(for: index))
-                                .offset(x: CGFloat(index - 2) * 12)
+                                .frame(width: 3, height: advancedWaveformHeight(for: index))
+                                .offset(x: CGFloat(index - 12) * 6)
+                                .blur(radius: 0.3) // Subtle blur for smoothness
                         }
                     }
                     .onAppear {
-                        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                        withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
                             waveformPhase = 1.0
+                        }
+                    }
+                }
+
+                // Particle effects around orb when speaking
+                if translator.agentState == .speaking || translator.agentState == .thinking {
+                    ForEach(0..<8, id: \.self) { index in
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    colors: [
+                                        Color.purple.opacity(0.6),
+                                        Color.clear
+                                    ],
+                                    center: .center,
+                                    startRadius: 0,
+                                    endRadius: 4
+                                )
+                            )
+                            .frame(width: 8, height: 8)
+                            .offset(particleOffset(for: index))
+                            .opacity(particleOpacity(for: index))
+                            .blur(radius: 1)
+                    }
+                    .onAppear {
+                        withAnimation(.linear(duration: 3).repeatForever(autoreverses: false)) {
+                            particlePhase = 1.0
                         }
                     }
                 }
@@ -469,18 +511,210 @@ public struct ZumuTranslatorView: View {
         .padding(.horizontal)
     }
 
+    // MARK: - Language Detection Badge
+
+    private var languageDetectionBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "globe.badge.chevron.backward")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.purple)
+                .symbolEffect(.pulse, options: .repeating, value: detectedLanguage)
+
+            if let language = detectedLanguage {
+                Text(language)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+            } else {
+                Text("Detecting...")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.purple.opacity(0.3),
+                            Color.blue.opacity(0.2)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
+                .shadow(color: Color.purple.opacity(0.3), radius: 10)
+        )
+        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: detectedLanguage)
+        .task {
+            // Poll for language detection every 2 seconds
+            await pollLanguageDetection()
+        }
+    }
+
+    // MARK: - Transcription Bubbles
+
+    private var transcriptionBubbles: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 12) {
+                ForEach(translator.messages.suffix(3)) { message in
+                    transcriptionBubble(message: message)
+                }
+            }
+            .padding(.horizontal)
+        }
+        .frame(maxHeight: 150)
+    }
+
+    private func transcriptionBubble(message: TranslationMessage) -> some View {
+        HStack {
+            if message.role == "user" {
+                Spacer()
+            }
+
+            VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 4) {
+                Text(message.content)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(
+                                message.role == "user" ?
+                                    LinearGradient(
+                                        colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.6)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ) :
+                                    LinearGradient(
+                                        colors: [Color.white.opacity(0.15), Color.white.opacity(0.1)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18)
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                            .shadow(
+                                color: message.role == "user" ? Color.blue.opacity(0.2) : Color.black.opacity(0.1),
+                                radius: 8
+                            )
+                    )
+
+                Text(message.timestamp, style: .time)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+
+            if message.role != "user" {
+                Spacer()
+            }
+        }
+        .transition(.asymmetric(
+            insertion: .move(edge: .bottom).combined(with: .opacity),
+            removal: .opacity
+        ))
+    }
+
     // MARK: - Helper Functions
 
-    private func waveformHeight(for index: Int) -> CGFloat {
-        let baseHeight: CGFloat = 20
-        let maxHeight: CGFloat = 50
+    private func advancedWaveformHeight(for index: Int) -> CGFloat {
+        let baseHeight: CGFloat = 15
+        let maxHeight: CGFloat = 60
 
-        // Create different animation patterns for each bar
-        let offset = CGFloat(index) * 0.2
+        // Create flowing wave pattern like Siri
+        let offset = CGFloat(index) * 0.15
         let phase = waveformPhase + offset
-        let normalizedPhase = sin(phase * .pi * 2)
 
-        return baseHeight + (maxHeight - baseHeight) * abs(normalizedPhase)
+        // Combine sine waves for organic movement
+        let wave1 = sin(phase * .pi * 2)
+        let wave2 = sin(phase * .pi * 3 + CGFloat.pi / 4) * 0.5
+        let wave3 = sin(phase * .pi * 1.5 - CGFloat.pi / 3) * 0.3
+
+        let combinedWave = wave1 + wave2 + wave3
+        let normalizedWave = (combinedWave + 1.8) / 3.6 // Normalize to 0-1
+
+        // Adjust height based on agent state
+        let stateMultiplier: CGFloat = {
+            switch translator.agentState {
+            case .listening: return 0.7
+            case .processing: return 0.9
+            case .thinking: return 1.1
+            case .speaking: return 1.3
+            default: return 0.5
+            }
+        }()
+
+        return baseHeight + (maxHeight - baseHeight) * normalizedWave * stateMultiplier
+    }
+
+    private func sirikWaveColor(for index: Int, agentState: AgentState) -> Color {
+        switch agentState {
+        case .listening:
+            return index % 3 == 0 ? .green : (index % 3 == 1 ? .blue : .cyan)
+        case .processing:
+            return index % 3 == 0 ? .blue : (index % 3 == 1 ? .purple : .indigo)
+        case .thinking:
+            return index % 3 == 0 ? .purple : (index % 3 == 1 ? .pink : .purple)
+        case .speaking:
+            return index % 3 == 0 ? .orange : (index % 3 == 1 ? .yellow : .orange)
+        default:
+            return .blue
+        }
+    }
+
+    private func particleOffset(for index: Int) -> CGSize {
+        let angle = (CGFloat(index) / 8.0) * 2 * .pi + particlePhase * 2 * .pi
+        let radius: CGFloat = 100
+
+        let x = cos(angle) * radius
+        let y = sin(angle) * radius
+
+        return CGSize(width: x, height: y)
+    }
+
+    private func particleOpacity(for index: Int) -> Double {
+        let phase = particlePhase + CGFloat(index) * 0.125
+        return 0.3 + 0.4 * abs(sin(phase * 2 * .pi))
+    }
+
+    private func pollLanguageDetection() async {
+        while translator.state == .active {
+            do {
+                // Call the API endpoint to get detected language
+                guard let url = URL(string: "\(translator.baseURL)/api/latest-language") else { continue }
+
+                let (data, _) = try await URLSession.shared.data(from: url)
+
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let language = json["language"] as? String,
+                   let hasLanguage = json["hasLanguage"] as? Bool,
+                   hasLanguage {
+                    await MainActor.run {
+                        if self.detectedLanguage != language {
+                            // Trigger haptic feedback on language change
+                            let generator = UIImpactFeedbackGenerator(style: .medium)
+                            generator.impactOccurred()
+
+                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                self.detectedLanguage = language
+                            }
+                        }
+                    }
+                }
+            } catch {
+                print("Failed to fetch language detection: \(error)")
+            }
+
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // Poll every 2 seconds
+        }
     }
 
     // MARK: - Actions
@@ -497,10 +731,18 @@ public struct ZumuTranslatorView: View {
     }
 
     private func handleCallAction() {
+        // Haptic feedback for button press
+        let generator = UIImpactFeedbackGenerator(style: .rigid)
+        generator.impactOccurred()
+
         switch translator.state {
         case .idle, .disconnected, .error:
             startSession()
         case .active:
+            // Success haptic when ending session
+            let endGenerator = UINotificationFeedbackGenerator()
+            endGenerator.notificationOccurred(.success)
+
             Task {
                 await translator.endSession()
             }
@@ -515,9 +757,20 @@ public struct ZumuTranslatorView: View {
         Task {
             do {
                 _ = try await translator.startSession(config: config)
+
+                // Success haptic on connection
+                await MainActor.run {
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.success)
+                }
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
+
+                    // Error haptic
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.error)
+
                     // Auto-clear error after 5 seconds
                     DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                         errorMessage = nil

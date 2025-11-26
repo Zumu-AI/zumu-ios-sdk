@@ -30,7 +30,7 @@ public class ZumuTranslator: ObservableObject {
     // MARK: - Private Properties
 
     private let apiKey: String
-    private let baseURL: String
+    internal let baseURL: String
     private var webSocketTask: URLSessionWebSocketTask?
     private var cancellables = Set<AnyCancellable>()
     private var audioEngine: AVAudioEngine?
