@@ -70,24 +70,58 @@ public class ZumuTokenSource: TokenSourceConfigurable {
             "dropoff_location": config.dropoffLocation as Any
         ]
 
+        print("📡 Requesting LiveKit token from: \(url.absoluteString)")
+        print("📡 API Key: \(apiKey.prefix(15))...")
+        print("📡 Driver: \(config.driverName) (\(config.driverLanguage))")
+        print("📡 Passenger: \(config.passengerName) (\(config.passengerLanguage ?? "Auto"))")
+
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("❌ Invalid HTTP response type")
             throw TokenSourceError.networkError("Invalid response")
         }
 
+        print("📡 HTTP Status: \(httpResponse.statusCode)")
+
         guard httpResponse.statusCode == 200 else {
-            throw TokenSourceError.networkError("HTTP \(httpResponse.statusCode)")
+            let responseBody = String(data: data, encoding: .utf8) ?? "Unable to decode response"
+            print("❌ HTTP \(httpResponse.statusCode)")
+            print("❌ Response body: \(responseBody)")
+            throw TokenSourceError.networkError("HTTP \(httpResponse.statusCode): \(responseBody)")
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let livekit = json["livekit"] as? [String: Any],
-              let token = livekit["token"] as? String,
-              let urlString = livekit["url"] as? String,
-              let serverURL = URL(string: urlString) else {
-            throw TokenSourceError.invalidResponse("Missing LiveKit token or URL in response")
+        // Try to parse response
+        let responseString = String(data: data, encoding: .utf8) ?? "Unable to decode"
+        print("📡 Response: \(responseString)")
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            print("❌ Failed to parse JSON response")
+            throw TokenSourceError.invalidResponse("Invalid JSON format")
+        }
+
+        guard let livekit = json["livekit"] as? [String: Any] else {
+            print("❌ Missing 'livekit' field in response")
+            print("❌ Available keys: \(json.keys.joined(separator: ", "))")
+            throw TokenSourceError.invalidResponse("Missing 'livekit' field")
+        }
+
+        guard let token = livekit["token"] as? String else {
+            print("❌ Missing 'token' field in livekit object")
+            print("❌ Available keys: \(livekit.keys.joined(separator: ", "))")
+            throw TokenSourceError.invalidResponse("Missing token")
+        }
+
+        guard let urlString = livekit["url"] as? String else {
+            print("❌ Missing 'url' field in livekit object")
+            throw TokenSourceError.invalidResponse("Missing URL")
+        }
+
+        guard let serverURL = URL(string: urlString) else {
+            print("❌ Invalid server URL: \(urlString)")
+            throw TokenSourceError.invalidResponse("Invalid server URL format")
         }
 
         print("✅ Received LiveKit token from Zumu backend")
