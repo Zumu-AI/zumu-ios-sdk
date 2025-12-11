@@ -191,22 +191,31 @@ public struct ZumuTranslatorView: View {
         VStack {
             HStack {
                 Spacer()
-                Button(action: {
-                    Task {
+                Button {
+                    Task { @MainActor in
+                        print("🔴 Close button tapped")
                         if session.isConnected {
+                            print("🔴 Ending session...")
                             await session.end()
                         }
+                        print("🔴 Dismissing view...")
                         dismiss()
                     }
-                }) {
+                } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .background(Circle().fill(.black.opacity(0.3)))
+                        .font(.system(size: 32))
+                        .foregroundStyle(.white)
+                        .background(
+                            Circle()
+                                .fill(.black.opacity(0.5))
+                                .frame(width: 32, height: 32)
+                        )
                 }
+                .buttonStyle(.plain)
             }
             Spacer()
         }
+        .zIndex(1000)
     }
 
     @ViewBuilder

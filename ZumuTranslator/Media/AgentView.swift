@@ -50,7 +50,7 @@ struct AgentView: View {
             }
         }
         .animation(.snappy, value: session.agent.audioTrack?.id)
-        .matchedGeometryEffect(id: "agent", in: namespace!)
+        .modifier(NamespaceEffectModifier(namespace: namespace))
         .overlay(alignment: .top) {
             if let config = translationConfig {
                 VStack(spacing: 12) {
@@ -108,6 +108,21 @@ struct AgentView: View {
                 )
                 .padding(.top, 60)
             }
+        }
+    }
+}
+
+// MARK: - Namespace Effect Modifier
+
+/// A modifier that conditionally applies matchedGeometryEffect only if namespace is provided
+private struct NamespaceEffectModifier: ViewModifier {
+    let namespace: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let namespace = namespace {
+            content.matchedGeometryEffect(id: "agent", in: namespace)
+        } else {
+            content
         }
     }
 }
