@@ -61,11 +61,11 @@ public class ZumuTokenSource: TokenSourceConfigurable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let body: [String: Any] = [
+            "session_id": config.tripId as Any,  // Backend now uses session_id
             "driver_name": config.driverName,
             "driver_language": config.driverLanguage,
             "passenger_name": config.passengerName,
             "passenger_language": config.passengerLanguage as Any,
-            "trip_id": config.tripId as Any,
             "pickup_location": config.pickupLocation as Any,
             "dropoff_location": config.dropoffLocation as Any
         ]
