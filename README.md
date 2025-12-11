@@ -1,87 +1,454 @@
-<img src="./.github/assets/app-icon.png" alt="Voice Agent App Icon" width="100" height="100">
+# Zumu Translator iOS SDK
 
-# Swift Voice Agent starter app
+Real-time voice translation iOS SDK powered by LiveKit and Zumu AI agents. Enables seamless driver-passenger communication across language barriers.
 
-This starter app template for [LiveKit Agents](https://docs.livekit.io/agents/overview/) provides a simple voice interface using the [LiveKit Swift SDK](https://github.com/livekit/client-sdk-swift). It supports [voice](https://docs.livekit.io/agents/start/voice-ai), [transcriptions](https://docs.livekit.io/agents/build/text/), [live video input](https://docs.livekit.io/agents/build/vision/#video), and [virtual avatars](https://docs.livekit.io/agents/integrations/avatar/).
+## Features
 
-This template is compatible with iOS, iPadOS, macOS, and visionOS and is free for you to use or modify as you see fit.
+- 🎙️ **Voice-Only Translation**: Real-time bidirectional speech translation
+- 🌐 **Multi-Language Support**: English, Spanish, Russian, Chinese, Arabic, Hindi, Turkish
+- 📊 **Audio Visualization**: Live waveform display for agent and microphone audio
+- 🔄 **Agent State Tracking**: Visual feedback for listening, processing, and speaking states
+- 📱 **Native iOS**: Built with SwiftUI for iOS 17.0+, macOS 14.0+
 
-<img src="./.github/assets/screenshot.png" alt="Voice Agent Screenshot" height="500">
+## Requirements
 
-## Getting started
+- iOS 17.0+ / macOS 14.0+
+- Xcode 15.0+
+- Swift 5.9+
+- Physical device (for testing audio - simulator has limited capabilities)
+- Zumu API key (get from [translator.zumu.ai](https://translator.zumu.ai))
 
-First, you'll need a LiveKit agent to speak with. Try our starter agent for [Python](https://github.com/livekit-examples/agent-starter-python), [Node.js](https://github.com/livekit-examples/agent-starter-node), or [create your own from scratch](https://docs.livekit.io/agents/start/voice-ai/).
+## Installation
 
-Second, you need a token server. The easiest way to set this up is with the [Sandbox for LiveKit Cloud](https://cloud.livekit.io/projects/p_/sandbox) and the [LiveKit CLI](https://docs.livekit.io/home/cli/cli-setup/).
-
-First, create a new [Sandbox Token Server](https://cloud.livekit.io/projects/p_/sandbox/templates/token-server) for your LiveKit Cloud project.
-Then, run the following command to automatically clone this template and connect it to LiveKit Cloud. This will create a new Xcode project in the current directory.
+### 1. Clone the Repository
 
 ```bash
-lk app create --template agent-starter-swift --sandbox <token_server_sandbox_id>
+git clone https://github.com/Zumu-AI/zumu-ios-sdk.git
+cd zumu-ios-sdk
 ```
 
-Then, build and run the app from Xcode by opening `VoiceAgent.xcodeproj`. You may need to adjust your app signing settings to run the app on your device.
+### 2. Open in Xcode
 
-> [!NOTE]
-> To set up without the LiveKit CLI, clone the repository and then either create a `VoiceAgent/.env.xcconfig` with a `LIVEKIT_SANDBOX_ID` (if using a [Sandbox Token Server](https://cloud.livekit.io/projects/p_/sandbox/templates/token-server)), or modify `VoiceAgent/VoiceAgentApp.swift` to replace the `SandboxTokenSource` with a custom token source implementation.
+```bash
+open ZumuTranslator.xcodeproj
+```
 
-## Feature overview
+### 3. Configure API Key
 
-This starter app supports several features of the agents framework and is easily configurable to enable or disable them in code based on your needs as you adapt this template to your own use case.
-
-### Text, video, and voice input
-
-This app supports text, video, and/or voice input according to the needs of your agent. To update the features enabled in the app, edit `VoiceAgent/VoiceAgentApp.swift` and modify the `.environment()` modifiers to enable or disable features.
-
-By default, all features (voice, video, and text input) are enabled. To disable a feature, change the value from `true` to `false`:
+Open `ZumuTranslator/ZumuTranslatorApp.swift` and set your API key:
 
 ```swift
-.environment(\.voiceEnabled, true)   // Enable voice input
-.environment(\.videoEnabled, false)  // Disable video input
-.environment(\.textEnabled, true)    // Enable text input
+@main
+struct ZumuTranslatorApp: App {
+    // TODO: Replace with your Zumu API key
+    private static let apiKey = "zumu_YOUR_API_KEY_HERE"
+    // ...
+}
 ```
 
-Available input types:
-- `.voice`: Allows the user to speak to the agent using their microphone. **Requires microphone permissions.**
-- `.text`: Allows the user to type to the agent. See [the docs](https://docs.livekit.io/agents/build/text/) for more details.
-- `.video`: Allows the user to share their camera or screen to the agent. This requires a supported model like the Gemini Live API. See [the docs](https://docs.livekit.io/agents/build/vision/#video) for more details.
+**⚠️ Security Note**: For production apps, store the API key in:
+- Keychain for secure storage
+- Environment variables
+- Configuration file (added to .gitignore)
+- Remote configuration service
 
-If you have trouble with screen sharing, refer to [the docs](https://docs.livekit.io/home/client/tracks/screenshare/) for more setup instructions.
+### 4. Update Bundle Identifier
 
-### Session
+In Xcode:
+1. Select project in navigator
+2. Select target "ZumuTranslator"
+3. Update Bundle Identifier to your organization's identifier (e.g., `com.yourcompany.zumutranslator`)
 
-The app is built on top of two main observable components from the [LiveKit Swift SDK](https://github.com/livekit/client-sdk-swift):
-- `Session` object to connect to the LiveKit infrastructure, interact with the `Agent` and its local state, and send/receive text messages.
-- `LocalMedia` object to manage the local media tracks (audio, video, screen sharing) and their lifecycle.
+## Configuration
 
-### Preconnect audio buffer
+### Translation Context
 
-This app enables `preConnectAudio` by default to capture and buffer audio before the room connection completes. This allows the connection to appear "instant" from the user's perspective and makes your app more responsive. To disable this feature, set `preConnectAudio` to `false` in `SessionOptions` when creating the `Session`.
+The SDK requires translation context before starting a session. This is captured via the configuration screen.
 
-### Virtual avatar support
+**Required Parameters:**
+- `driverName` (String): Driver's name
+- `driverLanguage` (String): Driver's language (e.g., "English", "Spanish")
+- `passengerName` (String): Passenger's name
+- `passengerLanguage` (String?): Passenger's language (optional - will auto-detect if nil)
 
-If your agent publishes a [virtual avatar](https://docs.livekit.io/agents/integrations/avatar/), this app will automatically render the avatar's camera feed in `AgentView` when available.
+**Optional Parameters:**
+- `tripId` (String?): Unique trip identifier (auto-generated UUID if not provided)
+- `pickupLocation` (String?): Pickup location
+- `dropoffLocation` (String?): Drop-off location
 
-## Token generation in production
+### Programmatic Configuration
 
-In production, you'll need to develop a solution to [generate tokens for your users](https://docs.livekit.io/home/server/generating-tokens/) that integrates with your authentication system. You should replace your `SandboxTokenSource` with an `EndpointTokenSource` or your own `TokenSourceFixed` or `TokenSourceConfigurable` implementation. Additionally, you can use the `.cached()` extension to cache valid tokens and avoid unnecessary token requests.
+If you want to bypass the configuration screen and set parameters programmatically:
 
-## Running on Simulator
+```swift
+@main
+struct ZumuTranslatorApp: App {
+    private static let apiKey = "zumu_YOUR_API_KEY_HERE"
 
-To use this template with video (or screen sharing) input, you need to run the app on a physical device. Testing on the Simulator will still support voice and text modes, as well as virtual avatars.
+    @State private var session: Session?
+    @State private var config: ZumuTokenSource.TranslationConfig?
 
-## Submitting to the App Store
+    init() {
+        // Programmatically set configuration
+        let presetConfig = ZumuTokenSource.TranslationConfig(
+            driverName: "John Smith",
+            driverLanguage: "English",
+            passengerName: "Maria Garcia",
+            passengerLanguage: "Spanish",
+            tripId: "trip_12345",
+            pickupLocation: "123 Main St",
+            dropoffLocation: "456 Oak Ave"
+        )
 
-`LiveKitWebRTC.xcframework`, which is part of the LiveKit Swift SDK, does not contain dSYMs. Submitting the app to the App Store will result in the following warning:
+        _config = State(initialValue: presetConfig)
+
+        let tokenSource = ZumuTokenSource(apiKey: Self.apiKey, config: presetConfig)
+        let session = Session(
+            tokenSource: tokenSource.cached(),
+            options: SessionOptions(
+                room: Room(
+                    roomOptions: RoomOptions(
+                        defaultAudioCaptureOptions: AudioCaptureOptions(),
+                        defaultAudioPublishOptions: AudioPublishOptions()
+                    )
+                )
+            )
+        )
+        _session = State(initialValue: session)
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            if let session = session {
+                AppView()
+                    .environmentObject(session)
+                    .environmentObject(LocalMedia(session: session))
+                    .environment(\.translationConfig, config)
+            }
+        }
+    }
+}
+```
+
+### Environment Variables (Alternative)
+
+You can also configure via environment variables:
+
+```swift
+private static let apiKey = ProcessInfo.processInfo.environment["ZUMU_API_KEY"] ?? "zumu_default_key"
+```
+
+Then set in Xcode Scheme:
+1. Product → Scheme → Edit Scheme
+2. Run → Arguments → Environment Variables
+3. Add: `ZUMU_API_KEY` = `zumu_YOUR_API_KEY_HERE`
+
+## Usage
+
+### Basic Flow
+
+1. **Launch App** → Configuration screen appears
+2. **Enter Translation Context**:
+   - Driver name and language
+   - Passenger name and language
+3. **Tap "Start Translation"** → Connects to Zumu backend
+4. **Speak** → Real-time translation begins
+5. **Tap "Disconnect"** → Ends session
+
+### Expected Behavior
+
+**Connection:**
+```
+🚀 Starting Zumu translation session
+   Driver: John (English)
+   Passenger: Maria (Spanish)
+✅ Received LiveKit token from Zumu backend
+🔗 Connecting to LiveKit...
+✅ Connected to room: zumu-org_xxx-session_xxx
+🤖 Agent connected
+📡 Agent state: listening
+```
+
+**During Translation:**
+- Agent listens → User speaks → Agent processes → Agent responds
+- Audio visualizer shows waveform when agent speaks
+- Microphone visualizer shows waveform when user speaks
+- Translation context displayed: "John → Maria" and "English ⇄ Spanish"
+
+## Architecture
+
+### Components
+
+**Token Source (`ZumuTokenSource.swift`)**
+- Calls Zumu backend API: `POST /api/conversations/start`
+- Returns LiveKit token with room credentials
+- Includes translation context in request
+
+**Session Management (`Session` from LiveKit)**
+- Manages room connection lifecycle
+- Tracks agent state (listening/processing/speaking)
+- Handles audio track routing automatically
+
+**UI Components**
+- `ConfigurationView`: Pre-session form for translation context
+- `AgentView`: Audio visualizer + translation context overlay
+- `ControlBar`: Microphone toggle, disconnect button
+- `AppView`: Main container with session management
+
+### Data Flow
 
 ```
-The archive did not include a dSYM for the LiveKitWebRTC.framework with the UUIDs [...]. Ensure that the archive's dSYM folder includes a DWARF file for LiveKitWebRTC.framework with the expected UUIDs.
+User Input (ConfigurationView)
+    ↓
+ZumuTokenSource → POST /api/conversations/start
+    ↓
+LiveKit Token
+    ↓
+Session.connect(token)
+    ↓
+LiveKit Room + Zumu Agent
+    ↓
+Audio Streams (bidirectional)
+    ↓
+Real-time Translation
 ```
 
-It will **not prevent** the app from being submitted to the App Store or passing the review process.
+## API Integration
 
-## Contributing
+### Backend Endpoint
 
-This template is open source and we welcome contributions! Please open a PR or issue through GitHub, and don't forget to join us in the [LiveKit Community Slack](https://livekit.io/join-slack)!
+**URL**: `https://translator.zumu.ai/api/conversations/start`
 
+**Method**: `POST`
+
+**Headers**:
+```
+Authorization: Bearer zumu_YOUR_API_KEY
+Content-Type: application/json
+```
+
+**Request Body**:
+```json
+{
+  "driver_name": "John",
+  "driver_language": "English",
+  "passenger_name": "Maria",
+  "passenger_language": "Spanish",
+  "trip_id": "trip_12345",
+  "pickup_location": "123 Main St",
+  "dropoff_location": "456 Oak Ave"
+}
+```
+
+**Response**:
+```json
+{
+  "livekit": {
+    "token": "eyJhbGc...",
+    "url": "wss://..."
+  }
+}
+```
+
+### Custom Backend
+
+To use a different backend URL:
+
+```swift
+let tokenSource = ZumuTokenSource(
+    apiKey: apiKey,
+    config: config,
+    baseURL: "https://your-custom-backend.com"  // Custom URL
+)
+```
+
+## Customization
+
+### Supported Languages
+
+Edit `ConfigurationView.swift` to add/remove languages:
+
+```swift
+private let supportedLanguages = [
+    "English",
+    "Spanish",
+    "Russian",
+    "Chinese",
+    "Arabic",
+    "Hindi",
+    "Turkish",
+    "French",  // Add new language
+    "German"   // Add new language
+]
+```
+
+**Note**: Backend must support the language for translation to work.
+
+### UI Customization
+
+**Colors** - Edit color definitions in project
+**Fonts** - Modify `.font()` modifiers in views
+**Layout** - Adjust spacing/sizing using `.grid` multipliers
+**Audio Visualizer** - Configure in `AgentView.swift`:
+```swift
+BarAudioVisualizer(
+    audioTrack: audioTrack,
+    agentState: session.agent.agentState ?? .listening,
+    barCount: 5,           // Number of bars
+    barSpacingFactor: 0.05, // Space between bars
+    barMinOpacity: 0.1     // Minimum bar opacity
+)
+```
+
+## Testing
+
+### Pre-flight Checklist
+
+- [ ] Physical iOS device connected (simulator audio is limited)
+- [ ] Valid Zumu API key configured
+- [ ] Backend API accessible (`https://translator.zumu.ai`)
+- [ ] Microphone permissions granted
+- [ ] Zumu agent deployed and running
+
+### Test Procedure
+
+1. **Build & Run** on physical device
+2. **Enter Configuration**:
+   - Driver: "Test Driver" (English)
+   - Passenger: "Test Passenger" (Spanish)
+3. **Tap "Start Translation"**
+4. **Verify Connection**:
+   - Status shows "Translation ready. Start speaking..."
+   - Audio visualizer visible
+   - Translation context overlay displays
+5. **Test Audio**:
+   - Speak in English → Listen for Spanish response
+   - Check waveform animates when agent speaks
+   - Check microphone visualizer shows input levels
+6. **Verify Agent State**:
+   - Should cycle: listening → processing → speaking → listening
+7. **Test Disconnect**: Tap phone icon → Returns to configuration
+
+### Common Issues
+
+**No Audio Output**
+- Check device volume is up
+- Ensure microphone permissions granted
+- Verify agent is deployed and running
+- Check backend API is accessible
+
+**Connection Fails**
+- Verify API key is valid
+- Check network connectivity
+- Ensure backend URL is correct
+- Check Xcode console for error messages
+
+**Audio Visualizer Not Animating**
+- Ensure agent is speaking (check agent state)
+- Verify audio track exists (check Session.agent.audioTrack)
+- Check LiveKit SDK logs for audio routing issues
+
+## Project Structure
+
+```
+ZumuTranslator/
+├── ZumuTranslatorApp.swift       # App entry point
+├── App/
+│   ├── AppView.swift              # Main container view
+│   └── ConfigurationView.swift   # Pre-session config form
+├── TokenSources/
+│   └── ZumuTokenSource.swift     # Backend API integration
+├── Media/
+│   ├── AgentView.swift            # Audio visualizer + overlay
+│   └── LocalMedia.swift           # Microphone management
+├── ControlBar/
+│   ├── ControlBar.swift           # Audio controls
+│   └── ControlBarButtonStyle.swift
+├── Interactions/
+│   └── VoiceInteractionView.swift # Voice-only UI
+├── Helpers/
+│   ├── Environment.swift          # Environment values
+│   ├── Extensions.swift           # Utility extensions
+│   └── ...
+└── Info.plist                     # Permissions & config
+```
+
+## Permissions
+
+Required permissions configured in `Info.plist`:
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>Zumu Translator needs microphone access for real-time translation</string>
+
+<key>UIBackgroundModes</key>
+<array>
+    <string>audio</string>
+</array>
+```
+
+## Dependencies
+
+**LiveKit Swift SDK**
+- Room management and WebRTC
+- Audio capture and playback
+- Track management
+
+**LiveKit Components**
+- `BarAudioVisualizer`: Audio waveform visualization
+- `SwiftUIVideoView`: Video rendering (for future avatar support)
+- Session management utilities
+
+Dependencies are managed via Swift Package Manager and configured in the Xcode project.
+
+## Production Deployment
+
+### Security Best Practices
+
+1. **API Key Storage**:
+   - Move API key to secure storage (Keychain)
+   - Never commit API keys to version control
+   - Use environment-specific keys (dev/staging/prod)
+
+2. **Network Security**:
+   - Ensure HTTPS for all API calls
+   - Implement certificate pinning for production
+   - Add request timeout handling
+
+3. **Error Handling**:
+   - Log errors to crash reporting service
+   - Show user-friendly error messages
+   - Implement retry logic for network failures
+
+### Build Configuration
+
+Create separate schemes for Dev/Staging/Production:
+1. Duplicate existing scheme
+2. Set environment variables per scheme
+3. Use build configurations for feature flags
+
+### App Store Submission
+
+Before submitting:
+- [ ] Update version and build number
+- [ ] Test on multiple device types
+- [ ] Verify all permissions are described
+- [ ] Add App Store screenshots
+- [ ] Write App Store description
+- [ ] Complete privacy policy
+
+## Support
+
+For issues or questions:
+- GitHub Issues: https://github.com/Zumu-AI/zumu-ios-sdk/issues
+- Documentation: https://translator.zumu.ai/docs
+- Email: support@zumu.ai
+
+## License
+
+[Your License Here]
+
+## Credits
+
+Built on [LiveKit](https://livekit.io/) - Open source WebRTC infrastructure
+Based on [agent-starter-swift](https://github.com/livekit-examples/agent-starter-swift) example

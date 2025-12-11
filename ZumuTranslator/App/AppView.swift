@@ -110,7 +110,7 @@ struct AppView: View {
                !localMedia.isCameraEnabled,
                !localMedia.isScreenShareEnabled
             {
-                Text("agent.listening")
+                Text("Translation ready. Start speaking...")
                     .font(.system(size: 15))
                     .shimmering()
                     .transition(.blurReplace)

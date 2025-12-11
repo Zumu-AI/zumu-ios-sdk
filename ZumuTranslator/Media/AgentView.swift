@@ -7,6 +7,7 @@ struct AgentView: View {
     @EnvironmentObject private var session: Session
 
     @Environment(\.namespace) private var namespace
+    @Environment(\.translationConfig) private var translationConfig
     /// Reveals the avatar camera view when true.
     @SceneStorage("videoTransition") private var videoTransition = false
 
@@ -50,5 +51,22 @@ struct AgentView: View {
         }
         .animation(.snappy, value: session.agent.audioTrack?.id)
         .matchedGeometryEffect(id: "agent", in: namespace!)
+        .overlay(alignment: .top) {
+            if let config = translationConfig {
+                VStack(spacing: 8) {
+                    Text("\(config.driverName) → \(config.passengerName)")
+                        .font(.headline)
+                        .foregroundColor(.white)
+
+                    Text("\(config.driverLanguage) ⇄ \(config.passengerLanguage ?? "Auto")")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.8))
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .cornerRadius(12)
+                .padding(.top, 20)
+            }
+        }
     }
 }

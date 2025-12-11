@@ -21,20 +21,9 @@ struct ControlBar: View {
     var body: some View {
         HStack(spacing: .zero) {
             biggerSpacer()
-            if voiceEnabled {
-                audioControls()
-                flexibleSpacer()
-            }
-            if videoEnabled {
-                videoControls()
-                flexibleSpacer()
-                screenShareButton()
-                flexibleSpacer()
-            }
-            if textEnabled {
-                textInputButton()
-                flexibleSpacer()
-            }
+            // Voice-only controls for translation
+            audioControls()
+            flexibleSpacer()
             disconnectButton()
             biggerSpacer()
         }
@@ -106,70 +95,6 @@ struct ControlBar: View {
             Spacer()
         }
         .frame(width: Constants.buttonWidth)
-    }
-
-    @ViewBuilder
-    private func videoControls() -> some View {
-        HStack(spacing: .zero) {
-            Spacer()
-            AsyncButton {
-                await localMedia.toggleCamera(disableScreenShare: true)
-            } label: {
-                Image(systemName: localMedia.isCameraEnabled ? "video.fill" : "video.slash.fill")
-                    .transition(.symbolEffect)
-                    .frame(height: Constants.buttonHeight)
-                    .padding(.horizontal, 2 * .grid)
-                    .contentShape(Rectangle())
-            }
-            #if os(macOS)
-            separator()
-            VideoDeviceSelector()
-                .frame(height: Constants.buttonHeight)
-            #endif
-            Spacer()
-        }
-        .frame(width: Constants.buttonWidth)
-        .disabled(!session.agent.isConnected)
-    }
-
-    @ViewBuilder
-    private func screenShareButton() -> some View {
-        AsyncButton {
-            await localMedia.toggleScreenShare(disableCamera: true)
-        } label: {
-            Image(systemName: "arrow.up.square.fill")
-                .frame(width: Constants.buttonWidth, height: Constants.buttonHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(
-            ControlBarButtonStyle(
-                isToggled: localMedia.isScreenShareEnabled,
-                foregroundColor: .fg1,
-                backgroundColor: .bg2,
-                borderColor: .separator1
-            )
-        )
-        .disabled(!session.agent.isConnected)
-    }
-
-    @ViewBuilder
-    private func textInputButton() -> some View {
-        Button {
-            chat.toggle()
-        } label: {
-            Image(systemName: "ellipsis.message.fill")
-                .frame(width: Constants.buttonWidth, height: Constants.buttonHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(
-            ControlBarButtonStyle(
-                isToggled: chat,
-                foregroundColor: .fg1,
-                backgroundColor: .bg2,
-                borderColor: .separator1
-            )
-        )
-        .disabled(!session.agent.isConnected)
     }
 
     @ViewBuilder
