@@ -44,13 +44,16 @@ public class ZumuTokenSource: TokenSourceConfigurable {
     // MARK: - TokenSourceConfigurable Protocol Implementation
 
     public func fetch(_ options: TokenRequestOptions) async throws -> TokenSourceResponse {
-        let token = try await fetchToken()
-        return TokenSourceResponse(token: token)
+        let (serverURL, token) = try await fetchTokenAndURL()
+        return TokenSourceResponse(
+            serverURL: serverURL,
+            participantToken: token
+        )
     }
 
     // MARK: - Private Implementation
 
-    private func fetchToken() async throws -> String {
+    private func fetchTokenAndURL() async throws -> (URL, String) {
         let url = URL(string: "\(baseURL)/api/conversations/start")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -81,13 +84,16 @@ public class ZumuTokenSource: TokenSourceConfigurable {
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let livekit = json["livekit"] as? [String: Any],
-              let token = livekit["token"] as? String else {
-            throw TokenSourceError.invalidResponse("Missing LiveKit token in response")
+              let token = livekit["token"] as? String,
+              let urlString = livekit["url"] as? String,
+              let serverURL = URL(string: urlString) else {
+            throw TokenSourceError.invalidResponse("Missing LiveKit token or URL in response")
         }
 
         print("✅ Received LiveKit token from Zumu backend")
+        print("🔗 LiveKit server URL: \(serverURL.absoluteString)")
 
-        return token
+        return (serverURL, token)
     }
 }
 

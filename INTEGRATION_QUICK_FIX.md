@@ -14,7 +14,7 @@ We've identified and fixed both compilation errors reported by your team:
 
 ### 2. ✅ Fixed: TokenSourceConfigurable Protocol Implementation (ZumuTokenSource.swift:5)
 
-**Issue**: Protocol signature changed in LiveKit SDK 2.10.0. Old signature used `token()`, new requires `fetch(_:)`.
+**Issue**: Protocol signature changed in LiveKit SDK 2.10.0. Old signature used `token()`, new requires `fetch(_:)` returning `TokenSourceResponse`.
 
 **Fix**: Updated protocol implementation in `ZumuTranslator/TokenSources/ZumuTokenSource.swift`:
 
@@ -24,12 +24,20 @@ public func token() async throws -> String { ... }
 
 // NEW (fixed):
 public func fetch(_ options: TokenRequestOptions) async throws -> TokenSourceResponse {
-    let token = try await fetchToken()
-    return TokenSourceResponse(token: token)
+    let (serverURL, token) = try await fetchTokenAndURL()
+    return TokenSourceResponse(
+        serverURL: serverURL,
+        participantToken: token
+    )
 }
 
-private func fetchToken() async throws -> String { ... }
+private func fetchTokenAndURL() async throws -> (URL, String) {
+    // ... fetches both URL and token from backend response
+    return (serverURL, token)
+}
 ```
+
+**Note**: `TokenSourceResponse` requires both `serverURL` and `participantToken`, which are both returned by the Zumu backend API.
 
 ## 📦 Exact LiveKit Dependency Versions (Tested & Working)
 
