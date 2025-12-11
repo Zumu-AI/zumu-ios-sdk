@@ -60,10 +60,15 @@ Copy these folders into your Xcode project:
    - `ZumuTranslator/Helpers/` → Utilities and extensions
    - `ZumuTranslator/App/` → Core view components
 
-2. **Required Support Files**:
-   - `ZumuTranslator/Assets.xcassets` → UI assets
+2. **Required Support Files** ⚠️ **CRITICAL - DO NOT SKIP**:
+   - `ZumuTranslator/Assets.xcassets` → **REQUIRED**: UI assets and custom colors (22 color definitions)
    - `ZumuTranslator/Info.plist` → Permissions configuration
    - `ZumuTranslator/Localizable.xcstrings` → Localization
+
+**⚠️ IMPORTANT**: If you don't copy `Assets.xcassets`, you'll get errors like:
+```
+Style.swift:28:26 Type 'ShapeStyle' has no member 'fgAccent'
+```
 
 3. **Add LiveKit Dependencies** (Use Exact Versions):
    - In your project: File → Add Package Dependencies...
