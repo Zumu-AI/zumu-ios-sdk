@@ -1,5 +1,6 @@
 import SwiftUI
 import LiveKit
+import LiveKitComponents
 
 /// Main SDK entry point for Zumu Translation
 ///
