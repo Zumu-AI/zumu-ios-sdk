@@ -33,37 +33,57 @@ The Zumu Translator SDK provides **two UI components** for integrating real-time
 
 ## Quick Start (5 Minutes)
 
-### 1. Add SDK to Your Project
-
-#### Option A: Swift Package Manager (Recommended)
-
-**In Xcode:**
-
-1. File → Add Package Dependencies...
-2. Enter URL: `https://github.com/Zumu-AI/zumu-ios-sdk.git`
-3. Click "Add Package"
-4. Select "ZumuTranslator" library
-5. Click "Add Package"
-
-**Done!** Xcode will download the SDK and all dependencies automatically.
-
-#### Option B: Manual Integration (Alternative)
-
-If you prefer manual integration:
+### 1. Clone the SDK Repository
 
 ```bash
 git clone https://github.com/Zumu-AI/zumu-ios-sdk.git
+cd zumu-ios-sdk
+open ZumuTranslator.xcodeproj
 ```
 
-Then drag the `Sources/ZumuTranslator` folder into your Xcode project.
+**Important**: Swift Package Manager is not supported due to LiveKit's complex binary dependencies (WebRTC framework) and swift-protobuf submodule issues. Use manual integration instead.
 
-### 2. Import the SDK
+### 2. Add SDK Files to Your Project
+
+You have two integration options:
+
+#### Option A: Copy SDK Files (Recommended)
+
+Copy these folders into your Xcode project:
+
+1. **Required Core SDK Files**:
+   - `ZumuTranslator/SDK/` → Contains main SDK public API
+   - `ZumuTranslator/TokenSources/` → Backend integration
+   - `ZumuTranslator/Media/` → Audio visualization components
+   - `ZumuTranslator/ControlBar/` → UI controls
+   - `ZumuTranslator/Interactions/` → Interaction views
+   - `ZumuTranslator/Helpers/` → Utilities and extensions
+   - `ZumuTranslator/App/` → Core view components
+
+2. **Required Support Files**:
+   - `ZumuTranslator/Assets.xcassets` → UI assets
+   - `ZumuTranslator/Info.plist` → Permissions configuration
+   - `ZumuTranslator/Localizable.xcstrings` → Localization
+
+3. **Add LiveKit Dependencies**:
+   - In your project: File → Add Package Dependencies...
+   - Add: `https://github.com/livekit/client-sdk-swift.git` (v2.0+)
+   - Add: `https://github.com/livekit/components-swift.git` (v0.1.6+)
+
+#### Option B: Build as Framework
+
+1. Open `ZumuTranslator.xcodeproj`
+2. Build the ZumuTranslator target as a framework
+3. Link the built framework to your app
+4. Embed the framework in your app bundle
+
+### 3. Import the SDK
 
 ```swift
 import ZumuTranslator
 ```
 
-### 3. Add Translation Button to Your UI
+### 4. Add Translation Button to Your UI
 
 #### SwiftUI Integration
 
