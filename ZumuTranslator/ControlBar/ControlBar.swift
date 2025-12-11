@@ -128,7 +128,7 @@ private struct OnDisconnectKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    fileprivate var onDisconnect: (() -> Void)? {
+    var onDisconnect: (() -> Void)? {
         get { self[OnDisconnectKey.self] }
         set { self[OnDisconnectKey.self] = newValue }
     }

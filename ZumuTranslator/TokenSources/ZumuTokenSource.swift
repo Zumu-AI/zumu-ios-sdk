@@ -41,7 +41,16 @@ public class ZumuTokenSource: TokenSourceConfigurable {
         self.baseURL = baseURL
     }
 
-    public func token() async throws -> String {
+    // MARK: - TokenSourceConfigurable Protocol Implementation
+
+    public func fetch(_ options: TokenRequestOptions) async throws -> TokenSourceResponse {
+        let token = try await fetchToken()
+        return TokenSourceResponse(token: token)
+    }
+
+    // MARK: - Private Implementation
+
+    private func fetchToken() async throws -> String {
         let url = URL(string: "\(baseURL)/api/conversations/start")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

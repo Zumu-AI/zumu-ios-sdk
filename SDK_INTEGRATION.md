@@ -65,10 +65,12 @@ Copy these folders into your Xcode project:
    - `ZumuTranslator/Info.plist` → Permissions configuration
    - `ZumuTranslator/Localizable.xcstrings` → Localization
 
-3. **Add LiveKit Dependencies**:
+3. **Add LiveKit Dependencies** (Use Exact Versions):
    - In your project: File → Add Package Dependencies...
-   - Add: `https://github.com/livekit/client-sdk-swift.git` (v2.0+)
-   - Add: `https://github.com/livekit/components-swift.git` (v0.1.6+)
+   - Add: `https://github.com/livekit/client-sdk-swift.git`
+     - Select "Exact Version" and enter `2.10.0`
+   - Add: `https://github.com/livekit/components-swift.git`
+     - Select "Exact Version" and enter `0.1.6`
 
 #### Option B: Build as Framework
 
@@ -396,6 +398,15 @@ struct SimpleView: View {
 - **Swift**: 5.9+
 - **Device**: Physical device recommended (simulator audio is limited)
 - **Permissions**: Microphone access (configured automatically by SDK)
+
+### Exact Tested Dependency Versions
+
+Use these **exact versions** for guaranteed compatibility:
+
+- **LiveKit Swift SDK**: `2.10.0` (`https://github.com/livekit/client-sdk-swift`)
+- **LiveKit Components**: `0.1.6` (`https://github.com/livekit/components-swift`)
+
+These versions are verified to work with the SDK. Other versions may cause compilation errors.
 
 ## Troubleshooting
 
