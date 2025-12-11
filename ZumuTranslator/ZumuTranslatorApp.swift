@@ -1,67 +1,101 @@
 import LiveKit
 import SwiftUI
 
+/// Demo app for testing the Zumu Translator SDK
+///
+/// This app demonstrates the SDK integration pattern.
+/// Integrators should follow this same pattern in their own apps.
 @main
 struct ZumuTranslatorApp: App {
-    // MARK: - Configuration
-
-    /// Zumu API Key - Replace with your actual API key from translator.zumu.ai
-    /// For production: Store in Keychain or use environment variables
-    private static let apiKey: String = {
-        // Option 1: Use environment variable (recommended for development)
-        if let envKey = ProcessInfo.processInfo.environment["ZUMU_API_KEY"] {
-            return envKey
-        }
-
-        // Option 2: Hardcode for testing (replace with your key)
-        return "zumu_YOUR_API_KEY_HERE"
-    }()
-
-    @State private var session: Session?
-    @State private var config: ZumuTokenSource.TranslationConfig?
-
     var body: some Scene {
         WindowGroup {
-            Group {
-                if let session = session {
-                    AppView()
-                        .environmentObject(session)
-                        .environmentObject(LocalMedia(session: session))
-                        .environment(\.translationConfig, config)
-                        .environment(\.voiceEnabled, true)
-                        .environment(\.videoEnabled, false)
-                        .environment(\.textEnabled, false)
-                } else {
-                    ConfigurationView(onStart: startSession)
-                }
-            }
+            DemoIntegrationView()
         }
         #if os(macOS)
         .defaultSize(width: 900, height: 900)
         #endif
     }
+}
 
-    private func startSession(config: ZumuTokenSource.TranslationConfig) {
-        print("🚀 Starting Zumu translation session")
-        print("   Driver: \(config.driverName) (\(config.driverLanguage))")
-        print("   Passenger: \(config.passengerName) (\(config.passengerLanguage ?? "Auto-detect"))")
+/// Demo view showing SDK integration
+struct DemoIntegrationView: View {
+    @State private var showTranslation = false
+    @State private var driverName = ""
+    @State private var driverLanguage = "English"
+    @State private var passengerName = ""
+    @State private var passengerLanguage = "Spanish"
 
-        let tokenSource = ZumuTokenSource(apiKey: Self.apiKey, config: config)
+    private let apiKey: String = {
+        if let envKey = ProcessInfo.processInfo.environment["ZUMU_API_KEY"] {
+            return envKey
+        }
+        return "zumu_YOUR_API_KEY_HERE"
+    }()
 
-        let session = Session(
-            tokenSource: tokenSource.cached(),
-            options: SessionOptions(
-                room: Room(
-                    roomOptions: RoomOptions(
-                        // Voice-only configuration
-                        defaultAudioCaptureOptions: AudioCaptureOptions(),
-                        defaultAudioPublishOptions: AudioPublishOptions()
-                    )
+    private let supportedLanguages = ["English", "Spanish", "Russian", "Chinese", "Arabic", "Hindi", "Turkish"]
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Driver") {
+                    TextField("Name", text: $driverName)
+                        .autocapitalization(.words)
+
+                    Picker("Language", selection: $driverLanguage) {
+                        ForEach(supportedLanguages, id: \.self) { language in
+                            Text(language).tag(language)
+                        }
+                    }
+                }
+
+                Section("Passenger") {
+                    TextField("Name", text: $passengerName)
+                        .autocapitalization(.words)
+
+                    Picker("Language", selection: $passengerLanguage) {
+                        ForEach(supportedLanguages, id: \.self) { language in
+                            Text(language).tag(language)
+                        }
+                    }
+                }
+
+                Section {
+                    Button(action: { showTranslation = true }) {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "bubble.left.and.bubble.right.fill")
+                            Text("Start Translation")
+                                .font(.headline)
+                            Spacer()
+                        }
+                    }
+                    .disabled(driverName.isEmpty || passengerName.isEmpty || apiKey == "zumu_YOUR_API_KEY_HERE")
+                }
+
+                if apiKey == "zumu_YOUR_API_KEY_HERE" {
+                    Section {
+                        Text("⚠️ Configure API key to test")
+                            .foregroundColor(.orange)
+                        Text("Set ZUMU_API_KEY environment variable or edit ZumuTranslatorApp.swift")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("SDK Demo")
+            .fullScreenCover(isPresented: $showTranslation) {
+                // THIS IS THE SDK INTEGRATION
+                ZumuTranslatorView(
+                    config: ZumuTranslator.TranslationConfig(
+                        driverName: driverName.isEmpty ? "Driver" : driverName,
+                        driverLanguage: driverLanguage,
+                        passengerName: passengerName.isEmpty ? "Passenger" : passengerName,
+                        passengerLanguage: passengerLanguage,
+                        tripId: UUID().uuidString
+                    ),
+                    apiKey: apiKey
                 )
-            )
-        )
-
-        self.session = session
-        self.config = config
+            }
+        }
     }
 }
