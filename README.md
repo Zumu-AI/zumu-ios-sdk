@@ -56,18 +56,27 @@ That's it! No complex setup, no audio configuration, no UI design needed.
 
 ## Installation
 
-### Swift Package Manager (Recommended)
+### Clone & Open Project
 
-In Xcode:
-1. File → Add Package Dependencies...
-2. Enter: `https://github.com/Zumu-AI/zumu-ios-sdk.git`
-3. Click "Add Package"
-
-**Done!** Import and use:
-
-```swift
-import ZumuTranslator
+```bash
+git clone https://github.com/Zumu-AI/zumu-ios-sdk.git
+cd zumu-ios-sdk
+open ZumuTranslator.xcodeproj
 ```
+
+The SDK is an **Xcode project** with all LiveKit dependencies pre-configured. To integrate into your app, you have two options:
+
+**Option 1: Copy SDK Files** (Recommended for simple integration)
+- Copy `ZumuTranslator/SDK/` folder to your project
+- Copy `ZumuTranslator/TokenSources/` folder
+- Copy required support files (see SDK_INTEGRATION.md)
+- Add LiveKit dependencies to your project
+
+**Option 2: Use as Framework**
+- Build ZumuTranslator.xcodeproj as a framework
+- Link the framework to your app
+
+**Note**: Swift Package Manager is not supported due to LiveKit's complex binary dependencies (WebRTC framework) and swift-protobuf submodule issues.
 
 ## Quick Start (3 Lines of Code)
 
