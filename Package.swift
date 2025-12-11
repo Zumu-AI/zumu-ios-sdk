@@ -19,9 +19,9 @@ let package = Package(
     ],
     dependencies: [
         // LiveKit Swift SDK
-        .package(url: "https://github.com/livekit/client-sdk-swift.git", from: "2.0.17"),
+        .package(url: "https://github.com/livekit/client-sdk-swift.git", from: "2.0.0"),
         // LiveKit Components
-        .package(url: "https://github.com/livekit/components-swift.git", from: "0.5.2")
+        .package(url: "https://github.com/livekit/components-swift.git", from: "0.1.6")
     ],
     targets: [
         .target(
