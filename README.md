@@ -1,6 +1,41 @@
 # Zumu Translator iOS SDK
 
-Real-time voice translation iOS SDK powered by LiveKit and Zumu AI agents. Enables seamless driver-passenger communication across language barriers.
+**Embeddable voice translation SDK** for iOS apps. Add real-time translation to your ride-hailing, delivery, or communication app in minutes.
+
+## What This SDK Provides
+
+### Two UI Components:
+
+1. **Your Button** - You add to your app UI
+2. **Agent Screen** - SDK provides the translation interface
+
+```
+Your App UI → [Your Button] → SDK Translation Screen
+```
+
+### Integration Flow:
+
+```swift
+// 1. User taps your button
+Button("Start Translation") { showTranslation = true }
+
+// 2. You pass variables to SDK
+.fullScreenCover(isPresented: $showTranslation) {
+    ZumuTranslatorView(
+        config: TranslationConfig(
+            driverName: "John",
+            driverLanguage: "English",
+            passengerName: "Maria",
+            passengerLanguage: "Spanish"
+        ),
+        apiKey: "zumu_YOUR_API_KEY"
+    )
+}
+
+// 3. SDK handles translation automatically
+```
+
+That's it! No complex setup, no audio configuration, no UI design needed.
 
 ## Features
 
@@ -9,6 +44,7 @@ Real-time voice translation iOS SDK powered by LiveKit and Zumu AI agents. Enabl
 - 📊 **Audio Visualization**: Live waveform display for agent and microphone audio
 - 🔄 **Agent State Tracking**: Visual feedback for listening, processing, and speaking states
 - 📱 **Native iOS**: Built with SwiftUI for iOS 17.0+, macOS 14.0+
+- ✅ **Embeddable**: Integrate into any iOS app with 3 lines of code
 
 ## Requirements
 
@@ -18,7 +54,35 @@ Real-time voice translation iOS SDK powered by LiveKit and Zumu AI agents. Enabl
 - Physical device (for testing audio - simulator has limited capabilities)
 - Zumu API key (get from [translator.zumu.ai](https://translator.zumu.ai))
 
-## Installation
+## Quick Start (3 Lines of Code)
+
+### For Integrators (Add to Your Existing App)
+
+**See [SDK_INTEGRATION.md](./SDK_INTEGRATION.md) for complete integration guide.**
+
+```swift
+import ZumuTranslator
+
+// 1. Add button to your UI
+Button("Start Translation") { showTranslation = true }
+
+// 2. Present SDK view
+.fullScreenCover(isPresented: $showTranslation) {
+    ZumuTranslatorView(
+        config: ZumuTranslator.TranslationConfig(
+            driverName: "John",
+            driverLanguage: "English",
+            passengerName: "Maria",
+            passengerLanguage: "Spanish"
+        ),
+        apiKey: "zumu_YOUR_API_KEY"
+    )
+}
+
+// 3. Done! SDK handles everything else
+```
+
+## For SDK Developers (Testing the SDK Itself)
 
 ### 1. Clone the Repository
 

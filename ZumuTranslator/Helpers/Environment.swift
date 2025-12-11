@@ -5,5 +5,5 @@ extension EnvironmentValues {
     @Entry var videoEnabled: Bool = false  // Translation is voice-only
     @Entry var textEnabled: Bool = false   // No chat initially
     @Entry var namespace: Namespace.ID? // don't initialize outside View
-    @Entry var translationConfig: ZumuTokenSource.TranslationConfig?
+    // Note: translationConfig is now defined in SDK/ZumuTranslator.swift as ZumuTranslator.TranslationConfig
 }

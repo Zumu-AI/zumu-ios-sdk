@@ -12,6 +12,7 @@ struct ControlBar: View {
     @Environment(\.voiceEnabled) private var voiceEnabled
     @Environment(\.videoEnabled) private var videoEnabled
     @Environment(\.textEnabled) private var textEnabled
+    @Environment(\.onDisconnect) private var onDisconnect
 
     private enum Constants {
         static let buttonWidth: CGFloat = 16 * .grid
@@ -102,6 +103,8 @@ struct ControlBar: View {
         AsyncButton {
             await session.end()
             session.restoreMessageHistory([])
+            // Call dismiss callback if provided (for SDK integration)
+            onDisconnect?()
         } label: {
             Image(systemName: "phone.down.fill")
                 .frame(width: Constants.buttonWidth, height: Constants.buttonHeight)
@@ -115,5 +118,18 @@ struct ControlBar: View {
             )
         )
         .disabled(!session.isConnected)
+    }
+}
+
+// MARK: - Environment Extensions for SDK Integration
+
+private struct OnDisconnectKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    fileprivate var onDisconnect: (() -> Void)? {
+        get { self[OnDisconnectKey.self] }
+        set { self[OnDisconnectKey.self] = newValue }
     }
 }
