@@ -54,6 +54,21 @@ That's it! No complex setup, no audio configuration, no UI design needed.
 - Physical device (for testing audio - simulator has limited capabilities)
 - Zumu API key (get from [translator.zumu.ai](https://translator.zumu.ai))
 
+## Installation
+
+### Swift Package Manager (Recommended)
+
+In Xcode:
+1. File → Add Package Dependencies...
+2. Enter: `https://github.com/Zumu-AI/zumu-ios-sdk.git`
+3. Click "Add Package"
+
+**Done!** Import and use:
+
+```swift
+import ZumuTranslator
+```
+
 ## Quick Start (3 Lines of Code)
 
 ### For Integrators (Add to Your Existing App)

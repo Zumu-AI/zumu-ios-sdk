@@ -37,17 +37,25 @@ The Zumu Translator SDK provides **two UI components** for integrating real-time
 
 #### Option A: Swift Package Manager (Recommended)
 
-```swift
-// In Xcode: File → Add Package Dependencies
-// Enter: https://github.com/Zumu-AI/zumu-ios-sdk.git
-```
+**In Xcode:**
 
-#### Option B: Manual Integration
+1. File → Add Package Dependencies...
+2. Enter URL: `https://github.com/Zumu-AI/zumu-ios-sdk.git`
+3. Click "Add Package"
+4. Select "ZumuTranslator" library
+5. Click "Add Package"
+
+**Done!** Xcode will download the SDK and all dependencies automatically.
+
+#### Option B: Manual Integration (Alternative)
+
+If you prefer manual integration:
 
 ```bash
 git clone https://github.com/Zumu-AI/zumu-ios-sdk.git
-# Drag ZumuTranslator folder into your Xcode project
 ```
+
+Then drag the `Sources/ZumuTranslator` folder into your Xcode project.
 
 ### 2. Import the SDK
 
