@@ -169,6 +169,10 @@ public struct ZumuTranslatorView: View {
                 connectingView()
             }
 
+            // Close button overlay (always visible)
+            closeButton()
+                .padding()
+
             errors()
         }
         .environment(\.translationConfig, config)
@@ -182,13 +186,116 @@ public struct ZumuTranslatorView: View {
     }
 
     @ViewBuilder
+    private func closeButton() -> some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button(action: {
+                    Task {
+                        if session.isConnected {
+                            await session.end()
+                        }
+                        dismiss()
+                    }
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .background(Circle().fill(.black.opacity(0.3)))
+                }
+            }
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
     private func connectingView() -> some View {
-        StartView()
+        VStack(spacing: 8 * 4) {
+            Spacer()
+
+            // Translation icon
+            Image(systemName: "translate")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+                .padding(.bottom, 20)
+
+            // Translation context
+            VStack(spacing: 12) {
+                Text("AI Translation Ready")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+
+                // Driver info
+                HStack(spacing: 8) {
+                    Image(systemName: "person.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.blue)
+                    Text("\(config.driverName)")
+                        .fontWeight(.medium)
+                    Text("(\(config.driverLanguage))")
+                        .foregroundStyle(.secondary)
+                }
+
+                // Translation arrow
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.gray)
+                    .padding(.vertical, 4)
+
+                // Passenger info
+                HStack(spacing: 8) {
+                    Image(systemName: "person.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.green)
+                    Text("\(config.passengerName)")
+                        .fontWeight(.medium)
+                    Text("(\(config.passengerLanguage ?? "Auto-detect"))")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal)
+
+            // Connect button
+            AsyncButton {
+                await session.start()
+            } label: {
+                HStack {
+                    Image(systemName: "mic.fill")
+                    Text("Start Translation")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(.blue)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            } busyLabel: {
+                HStack(spacing: 12) {
+                    ProgressView()
+                        .tint(.white)
+                    Text("Connecting...")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(.blue.opacity(0.8))
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+            .padding(.horizontal, 40)
+            .padding(.top, 20)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environmentObject(session)
+        .environmentObject(localMedia)
     }
 
     @ViewBuilder
     private func translationInterface() -> some View {
         VoiceInteractionView()
+            .environmentObject(session)
+            .environmentObject(localMedia)
             .overlay(alignment: .bottom) {
                 listeningIndicator()
                     .padding()

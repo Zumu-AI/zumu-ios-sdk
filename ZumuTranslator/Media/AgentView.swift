@@ -53,19 +53,60 @@ struct AgentView: View {
         .matchedGeometryEffect(id: "agent", in: namespace!)
         .overlay(alignment: .top) {
             if let config = translationConfig {
-                VStack(spacing: 8) {
-                    Text("\(config.driverName) → \(config.passengerName)")
-                        .font(.headline)
-                        .foregroundColor(.white)
+                VStack(spacing: 12) {
+                    // Title
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 14))
+                        Text("Live Translation")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.white)
 
-                    Text("\(config.driverLanguage) ⇄ \(config.passengerLanguage ?? "Auto")")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.8))
+                    // Translation participants
+                    HStack(spacing: 12) {
+                        // Driver
+                        VStack(spacing: 4) {
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundStyle(.blue)
+                            Text(config.driverName)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            Text(config.driverLanguage)
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+
+                        // Translation arrow
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.white.opacity(0.6))
+
+                        // Passenger
+                        VStack(spacing: 4) {
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundStyle(.green)
+                            Text(config.passengerName)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            Text(config.passengerLanguage ?? "Auto")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+                    .foregroundColor(.white)
                 }
-                .padding()
-                .background(.ultraThinMaterial)
-                .cornerRadius(12)
-                .padding(.top, 20)
+                .padding(.vertical, 16)
+                .padding(.horizontal, 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(.ultraThinMaterial)
+                        .shadow(color: .black.opacity(0.2), radius: 10, y: 5)
+                )
+                .padding(.top, 60)
             }
         }
     }
