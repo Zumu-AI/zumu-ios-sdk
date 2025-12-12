@@ -161,9 +161,6 @@ public struct ZumuTranslatorView: View {
             )
         )
 
-        // Configure Room audio manager to enable playback
-        session.room.audioManager.isSpeakerOutputPreferred = true
-
         _session = StateObject(wrappedValue: session)
         _localMedia = StateObject(wrappedValue: LocalMedia(session: session))
     }
@@ -205,7 +202,8 @@ public struct ZumuTranslatorView: View {
                     let participants = await session.room.allParticipants
                     print("🎵 Audio tracks status:")
                     for participant in participants.values {
-                        print("   Participant: \(participant.identity ?? "unknown")")
+                        let identity = await participant.identity
+                        print("   Participant: \(identity)")
                         let audioTracks = await participant.audioTracks
                         for (_, publication) in audioTracks {
                             print("      Track: \(publication.sid ?? "no-sid")")
