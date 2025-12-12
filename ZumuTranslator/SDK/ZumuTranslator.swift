@@ -153,11 +153,16 @@ public struct ZumuTranslatorView: View {
                 room: Room(
                     roomOptions: RoomOptions(
                         defaultAudioCaptureOptions: AudioCaptureOptions(),
-                        defaultAudioPublishOptions: AudioPublishOptions()
+                        defaultAudioPublishOptions: AudioPublishOptions(),
+                        dynacast: true,
+                        stopLocalTrackOnUnpublish: false
                     )
                 )
             )
         )
+
+        // Configure Room audio manager to enable playback
+        session.room.audioManager.isSpeakerOutputPreferred = true
 
         _session = StateObject(wrappedValue: session)
         _localMedia = StateObject(wrappedValue: LocalMedia(session: session))
@@ -193,6 +198,25 @@ public struct ZumuTranslatorView: View {
                 // Reconfigure audio when session connects
                 print("🔗 Session connected - ensuring speaker output")
                 configureAudioSession()
+
+                // Log audio tracks
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // Wait 1 second
+                    let participants = await session.room.allParticipants
+                    print("🎵 Audio tracks status:")
+                    for participant in participants.values {
+                        print("   Participant: \(participant.identity ?? "unknown")")
+                        let audioTracks = await participant.audioTracks
+                        for (_, publication) in audioTracks {
+                            print("      Track: \(publication.sid ?? "no-sid")")
+                            print("      Subscribed: \(publication.isSubscribed)")
+                            print("      Muted: \(publication.isMuted)")
+                            if let track = publication.track {
+                                print("      Track enabled: \(track.isEnabled)")
+                            }
+                        }
+                    }
+                }
             }
         }
         .onDisappear {
