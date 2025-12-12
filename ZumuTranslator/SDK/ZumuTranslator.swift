@@ -146,14 +146,15 @@ public struct ZumuTranslatorView: View {
             baseURL: baseURL
         )
 
-        // Create session (audio routing handled by AVAudioSession)
+        // Configure audio session FIRST, before LiveKit initializes
+        Self.configureAudioSessionForSpeaker()
+
+        // Create session with minimal options (let LiveKit handle audio defaults)
         let session = Session(
             tokenSource: tokenSource.cached(),
             options: SessionOptions(
                 room: Room(
                     roomOptions: RoomOptions(
-                        defaultAudioCaptureOptions: AudioCaptureOptions(),
-                        defaultAudioPublishOptions: AudioPublishOptions(),
                         dynacast: true,
                         stopLocalTrackOnUnpublish: false
                     )
@@ -186,15 +187,12 @@ public struct ZumuTranslatorView: View {
             print("🚀 Starting Zumu translation session")
             print("   Driver: \(config.driverName) (\(config.driverLanguage))")
             print("   Passenger: \(config.passengerName) (\(config.passengerLanguage ?? "Auto-detect"))")
-
-            // Configure audio session for speaker output
-            configureAudioSession()
         }
         .onChange(of: session.isConnected) { oldValue, newValue in
             if newValue {
-                // Reconfigure audio when session connects
-                print("🔗 Session connected - ensuring speaker output")
-                configureAudioSession()
+                // Ensure speaker output after LiveKit connection
+                print("🔗 Session connected - forcing speaker output")
+                reconfigureAudioOutput()
 
                 // Log audio tracks - wait longer for agent to publish
                 Task {
@@ -245,29 +243,37 @@ public struct ZumuTranslatorView: View {
 
     // MARK: - Audio Configuration
 
-    private func configureAudioSession() {
+    private static func configureAudioSessionForSpeaker() {
         let audioSession = AVAudioSession.sharedInstance()
         do {
             // Configure for voice chat with speaker output
+            // CRITICAL: Set this BEFORE LiveKit initializes to avoid conflicts
             try audioSession.setCategory(
                 .playAndRecord,
-                mode: .videoChat,  // videoChat mode works better for remote audio
+                mode: .voiceChat,  // Use voiceChat mode for better compatibility
                 options: [
                     .defaultToSpeaker,
                     .allowBluetooth,
-                    .allowBluetoothA2DP,
-                    .mixWithOthers
+                    .allowBluetoothA2DP
                 ]
             )
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            try audioSession.setActive(true)
 
-            // Explicitly override audio route to speaker
-            try audioSession.overrideOutputAudioPort(.speaker)
-
-            print("🔊 Audio session configured: speaker output enabled")
-            print("🔊 Current route: \(audioSession.currentRoute.outputs.map { $0.portType.rawValue })")
+            print("🔊 Audio session configured (before LiveKit init)")
         } catch {
             print("❌ Failed to configure audio session: \(error)")
+        }
+    }
+
+    private func reconfigureAudioOutput() {
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            // Force speaker output after connection
+            try audioSession.overrideOutputAudioPort(.speaker)
+            print("🔊 Audio output overridden to speaker")
+            print("🔊 Current route: \(audioSession.currentRoute.outputs.map { $0.portType.rawValue })")
+        } catch {
+            print("❌ Failed to override audio output: \(error)")
         }
     }
 
