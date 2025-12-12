@@ -146,17 +146,14 @@ public struct ZumuTranslatorView: View {
             baseURL: baseURL
         )
 
-        // Create session with speaker audio output
+        // Create session (audio routing handled by AVAudioSession)
         let session = Session(
             tokenSource: tokenSource.cached(),
             options: SessionOptions(
                 room: Room(
                     roomOptions: RoomOptions(
                         defaultAudioCaptureOptions: AudioCaptureOptions(),
-                        defaultAudioPublishOptions: AudioPublishOptions(),
-                        defaultAudioOutputOptions: AudioOutputOptions(
-                            outputRoute: .speaker  // Force audio to speaker
-                        )
+                        defaultAudioPublishOptions: AudioPublishOptions()
                     )
                 )
             )
