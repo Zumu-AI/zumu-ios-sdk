@@ -177,18 +177,16 @@ public struct ZumuTranslatorView: View {
             print("   Driver: \(config.driverName) (\(config.driverLanguage))")
             print("   Passenger: \(config.passengerName) (\(config.passengerLanguage ?? "Auto-detect"))")
 
-            // Configure audio session before starting
-            configureAudioForPlayback()
+            // Trust LiveKit's default audio management (speaker output enabled by default)
+            print("🔊 LiveKit AudioManager will handle audio routing automatically")
         }
         .onChange(of: session.isConnected) { oldValue, newValue in
             if newValue {
-                // Force speaker output and ensure audio is not muted
-                print("🔗 Session connected - configuring audio playback")
-                configureAudioForPlayback()
+                print("🔗 Session connected")
 
-                // Ensure remote audio is not muted
+                // Log audio state for debugging
                 Task {
-                    await checkAndUnmuteRemoteAudio()
+                    await logAudioState()
                 }
 
                 // Log audio tracks - wait longer for agent to publish
@@ -238,74 +236,23 @@ public struct ZumuTranslatorView: View {
         }
     }
 
-    // MARK: - Audio Configuration
+    // MARK: - Audio Debugging
 
-    private func configureAudioForPlayback() {
-        print("🔊 Configuring audio for playback...")
+    private func logAudioState() async {
+        // Log AVAudioSession state (LiveKit manages this)
         let audioSession = AVAudioSession.sharedInstance()
+        let route = audioSession.currentRoute
+        print("🔊 AVAudioSession state:")
+        print("🔊   Category: \(audioSession.category.rawValue)")
+        print("🔊   Mode: \(audioSession.mode.rawValue)")
+        print("🔊   Route: \(route.outputs.map { $0.portType.rawValue }.joined(separator: ", "))")
+        print("🔊   Volume: \(audioSession.outputVolume)")
 
-        do {
-            // Set category for two-way communication with speaker output
-            try audioSession.setCategory(
-                .playAndRecord,
-                mode: .voiceChat,
-                options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
-            )
-            print("🔊 ✅ Audio category set: playAndRecord, mode: voiceChat")
-
-            // Activate audio session
-            try audioSession.setActive(true)
-            print("🔊 ✅ Audio session activated")
-
-            // Override to speaker
-            try audioSession.overrideOutputAudioPort(.speaker)
-            print("🔊 ✅ Audio route overridden to speaker")
-
-            // Log current state
-            let route = audioSession.currentRoute
-            print("🔊 📍 Current route: \(route.outputs.map { $0.portType.rawValue }.joined(separator: ", "))")
-            print("🔊 📍 Output volume: \(audioSession.outputVolume)")
-
-        } catch {
-            print("❌ Audio configuration failed: \(error.localizedDescription)")
-        }
-    }
-
-    private func checkAndUnmuteRemoteAudio() async {
-        print("🔇 Checking remote audio mute state...")
-
-        let participants = await session.room.allParticipants
-        for participant in participants.values {
-            let identity = await participant.identity
-            let kind = await participant.kind
-
-            if kind == .agent {
-                print("🔇 Found agent: \(String(describing: identity))")
-
-                let audioTracks = await participant.audioTracks
-                for publication in audioTracks {
-                    let sid = publication.sid.stringValue
-                    let isMuted = publication.isMuted
-                    let isSubscribed = publication.isSubscribed
-
-                    print("🔇    Track \(sid): muted=\(isMuted), subscribed=\(isSubscribed)")
-
-                    if isMuted {
-                        print("🔇    ⚠️ Track is MUTED - this might be intentional")
-                    }
-
-                    if !isSubscribed {
-                        print("🔇    ⚠️ Track is NOT SUBSCRIBED")
-                    }
-
-                    // Check if track object exists
-                    if let track = publication.track {
-                        print("🔇    ✅ Track object exists: \(type(of: track))")
-                    } else {
-                        print("🔇    ❌ Track object is NIL")
-                    }
-                }
-            }
+        // Check if agent audio track exists
+        if let agentTrack = session.agent.audioTrack {
+            print("🔊 ✅ Agent audio track exists: \(agentTrack)")
+        } else {
+            print("🔊 ❌ Agent audio track is NIL")
         }
     }
 
