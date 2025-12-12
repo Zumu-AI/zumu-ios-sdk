@@ -115,8 +115,9 @@ public struct ZumuTranslatorView: View {
     public let apiKey: String
     public let baseURL: String
 
-    @StateObject private var session: Session
-    @StateObject private var localMedia: LocalMedia
+    // ✅ Changed from @StateObject to @State - allows fresh session creation
+    @State private var session: Session?
+    @State private var localMedia: LocalMedia?
     @Environment(\.dismiss) private var dismiss
 
     public init(
@@ -127,6 +128,16 @@ public struct ZumuTranslatorView: View {
         self.config = config
         self.apiKey = apiKey
         self.baseURL = baseURL
+        // ✅ Don't create session in init - wait for onAppear
+        // This allows creating fresh sessions for each conversation
+    }
+
+    // MARK: - Session Lifecycle
+
+    /// Create a fresh session instance
+    /// Called in onAppear to ensure clean state for each conversation
+    private func createFreshSession() {
+        print("✅ Creating fresh session instance")
 
         // Create ZumuTokenSource configuration
         let tokenConfig = ZumuTokenSource.TranslationConfig(
@@ -147,134 +158,269 @@ public struct ZumuTranslatorView: View {
         )
 
         // Create session with minimal options (let LiveKit handle everything)
-        let session = Session(
+        let newSession = Session(
             tokenSource: tokenSource.cached()
         )
 
-        _session = StateObject(wrappedValue: session)
-        _localMedia = StateObject(wrappedValue: LocalMedia(session: session))
+        let newLocalMedia = LocalMedia(session: newSession)
+
+        // Set state
+        self.session = newSession
+        self.localMedia = newLocalMedia
+
+        print("✅ Fresh session created - ready for connection")
+    }
+
+    /// Complete cleanup of session and media
+    /// Called in onDisappear to ensure proper resource deallocation
+    private func cleanupSession() async {
+        print("🧹 Starting session cleanup")
+
+        guard let session = session else {
+            print("🧹 No session to cleanup")
+            return
+        }
+
+        if session.isConnected {
+            print("🧹 Ending connected session...")
+            await session.end()
+        }
+
+        // Allow cleanup time for WebRTC to fully teardown
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 second
+
+        // Nil references to trigger deallocation
+        self.session = nil
+        self.localMedia = nil
+
+        print("✅ Session cleanup complete")
     }
 
     public var body: some View {
-        ZStack(alignment: .top) {
-            if session.isConnected {
-                translationInterface()
+        // ✅ Guard rendering until session is created
+        Group {
+            if let session = session, let localMedia = localMedia {
+                // Session exists - show interface
+                sessionInterface(session: session, localMedia: localMedia)
             } else {
-                connectingView()
+                // No session yet - show loading
+                loadingView()
             }
-
-            // Close button overlay (always visible)
-            closeButton()
-                .padding()
-
-            errors()
         }
         .environment(\.translationConfig, config)
         .background(.bg1)
-        .animation(.default, value: session.isConnected)
         .onAppear {
             print("🚀 Starting Zumu translation session")
             print("   Driver: \(config.driverName) (\(config.driverLanguage))")
             print("   Passenger: \(config.passengerName) (\(config.passengerLanguage ?? "Auto-detect"))")
 
-            // Trust LiveKit's default audio management (speaker output enabled by default)
-            print("🔊 LiveKit AudioManager will handle audio routing automatically")
+            // Detect simulator
+            #if targetEnvironment(simulator)
+            print("⚠️ WARNING: Running on iOS Simulator - WebRTC audio playback may not work!")
+            print("⚠️ For full audio functionality, please test on a physical iOS device")
+            #endif
+
+            // ✅ Create fresh session instance
+            createFreshSession()
+
+            // Force AudioManager configuration BEFORE connecting
+            forceAudioManagerConfiguration()
         }
-        .onChange(of: session.isConnected) { oldValue, newValue in
-            if newValue {
-                print("🔗 Session connected")
+        .onChange(of: session?.isConnected) { oldValue, newValue in
+            // ✅ Handle optional session
+            guard let session = session, newValue == true else { return }
 
-                // Log audio state for debugging
-                Task {
-                    await logAudioState()
-                }
+            print("🔗 Session connected")
 
-                // Log audio tracks - wait longer for agent to publish
-                Task {
-                    try? await Task.sleep(nanoseconds: 3_000_000_000) // Wait 3 seconds for agent to publish
-                    let participants = await session.room.allParticipants
-                    print("🎵 Audio tracks diagnostic:")
-                    print("🎵 Total participants: \(participants.count)")
+            // Reconfigure AudioManager after connection
+            forceAudioManagerConfiguration()
 
-                    for participant in participants.values {
-                        let identity = await participant.identity
-                        let kind = await participant.kind
-                        print("🎵 Participant: \(identity) (kind: \(kind))")
+            // Log comprehensive audio state
+            Task {
+                await logAudioState(session: session)
+            }
 
-                        let audioTracks = await participant.audioTracks
-                        print("🎵    Audio tracks count: \(audioTracks.count)")
+            // Wait for agent track, then force max volume
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000) // Wait 2 seconds
+                await forceTrackVolume(session: session)
+            }
 
-                        for publication in audioTracks {
-                            print("🎵       Track SID: \(publication.sid.stringValue)")
-                            print("🎵       Subscribed: \(publication.isSubscribed)")
-                            print("🎵       Muted: \(publication.isMuted)")
-                            print("🎵       Track exists: \(publication.track != nil)")
+            // Log audio tracks - wait longer for agent to publish
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000) // Wait 3 seconds for agent to publish
+                let participants = await session.room.allParticipants
+                print("🎵 Audio tracks diagnostic:")
+                print("🎵 Total participants: \(participants.count)")
 
-                            if let track = publication.track as? RemoteAudioTrack {
-                                print("🎵       RemoteAudioTrack found!")
-                            }
+                for participant in participants.values {
+                    let identity = await participant.identity
+                    let kind = await participant.kind
+                    print("🎵 Participant: \(identity) (kind: \(kind))")
+
+                    let audioTracks = await participant.audioTracks
+                    print("🎵    Audio tracks count: \(audioTracks.count)")
+
+                    for publication in audioTracks {
+                        print("🎵       Track SID: \(publication.sid.stringValue)")
+                        print("🎵       Subscribed: \(publication.isSubscribed)")
+                        print("🎵       Muted: \(publication.isMuted)")
+                        print("🎵       Track exists: \(publication.track != nil)")
+
+                        if let track = publication.track as? RemoteAudioTrack {
+                            print("🎵       RemoteAudioTrack found!")
                         }
                     }
+                }
 
-                    // Also check session.agent directly
-                    if let agentTrack = session.agent.audioTrack {
-                        print("🎵 Session.agent.audioTrack EXISTS: \(agentTrack)")
-                    } else {
-                        print("🎵 Session.agent.audioTrack is NIL")
-                    }
+                // Also check session.agent directly
+                if let agentTrack = session.agent.audioTrack {
+                    print("🎵 Session.agent.audioTrack EXISTS: \(agentTrack)")
+                } else {
+                    print("🎵 Session.agent.audioTrack is NIL")
                 }
             }
         }
         .onDisappear {
-            print("🔴 SDK dismissed - cleaning up audio session")
-            // Deactivate audio session when SDK closes
-            do {
-                try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-            } catch {
-                print("❌ Failed to deactivate audio session: \(error)")
+            print("🔴 SDK dismissed - cleaning up session")
+            // ✅ Use new cleanup method
+            Task {
+                await cleanupSession()
             }
+            // AudioManager will handle audio session cleanup automatically
+            // Do NOT manually deactivate AVAudioSession as it conflicts with AudioManager
         }
     }
 
-    // MARK: - Audio Debugging
+    // MARK: - Audio Debugging & Configuration
 
-    private func logAudioState() async {
-        // Log AVAudioSession state (LiveKit manages this)
+    private func logAudioState(session: Session) async {
+        print("🔊 ===== COMPREHENSIVE AUDIO DIAGNOSTICS =====")
+
+        // 1. AVAudioSession State
         let audioSession = AVAudioSession.sharedInstance()
         let route = audioSession.currentRoute
-        print("🔊 AVAudioSession state:")
+        print("🔊 AVAudioSession:")
         print("🔊   Category: \(audioSession.category.rawValue)")
         print("🔊   Mode: \(audioSession.mode.rawValue)")
         print("🔊   Route: \(route.outputs.map { $0.portType.rawValue }.joined(separator: ", "))")
         print("🔊   Volume: \(audioSession.outputVolume)")
+        print("🔊   Is other audio playing: \(audioSession.isOtherAudioPlaying)")
 
-        // Check if agent audio track exists
-        if let agentTrack = session.agent.audioTrack {
-            print("🔊 ✅ Agent audio track exists: \(agentTrack)")
+        // 2. AudioManager State (CRITICAL)
+        print("🔊 AudioManager:")
+        print("🔊   Auto config enabled: \(AudioManager.shared.audioSession.isAutomaticConfigurationEnabled)")
+        print("🔊   Engine running: \(AudioManager.shared.isEngineRunning)")
+        print("🔊   Manual rendering mode: \(AudioManager.shared.isManualRenderingMode)")
+        print("🔊   Speaker output preferred: \(AudioManager.shared.isSpeakerOutputPreferred)")
+
+        // 3. Mixer State
+        print("🔊 Mixer:")
+        print("🔊   Output volume: \(AudioManager.shared.mixer.outputVolume)")
+
+        // 4. Remote Audio Track State
+        if let agentTrack = session.agent.audioTrack as? RemoteAudioTrack {
+            print("🔊 Remote Track:")
+            print("🔊   Track volume: \(agentTrack.volume)")
+            print("🔊   Track: \(agentTrack)")
         } else {
-            print("🔊 ❌ Agent audio track is NIL")
+            print("🔊 ❌ Agent audio track is NIL or wrong type")
+        }
+
+        print("🔊 =========================================")
+    }
+
+    private func forceAudioManagerConfiguration() {
+        print("🔧 Forcing AudioManager configuration...")
+
+        // Ensure automatic configuration is enabled
+        AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = true
+        print("🔧 ✅ Auto configuration enabled")
+
+        // Ensure speaker output is preferred
+        AudioManager.shared.isSpeakerOutputPreferred = true
+        print("🔧 ✅ Speaker output preferred set")
+
+        // Ensure engine availability is enabled (both input and output)
+        do {
+            try AudioManager.shared.setEngineAvailability(.default)
+            print("🔧 ✅ Engine availability set to default (input and output enabled)")
+        } catch {
+            print("🔧 ⚠️ Failed to set engine availability: \(error)")
+        }
+
+        // Ensure manual rendering is OFF
+        if AudioManager.shared.isManualRenderingMode {
+            print("🔧 ⚠️ Manual rendering mode is ON - this prevents automatic playback!")
+            do {
+                try AudioManager.shared.setManualRenderingMode(false)
+                print("🔧 ✅ Manual rendering mode disabled")
+            } catch {
+                print("🔧 ⚠️ Failed to disable manual rendering mode: \(error)")
+            }
+        }
+
+        // Set mixer output volume to max
+        AudioManager.shared.mixer.outputVolume = 1.0
+        print("🔧 ✅ Mixer output volume set to 1.0")
+
+        print("🔧 AudioManager configuration complete")
+    }
+
+    private func forceTrackVolume(session: Session) async {
+        if let agentTrack = session.agent.audioTrack as? RemoteAudioTrack {
+            print("🔊 Setting agent track volume to MAXIMUM")
+            agentTrack.volume = 1.0
+            print("🔊 ✅ Agent track volume: \(agentTrack.volume)")
         }
     }
 
+    // MARK: - View Helpers
+
+    /// Loading view shown while session is being created
     @ViewBuilder
-    private func closeButton() -> some View {
+    private func loadingView() -> some View {
+        VStack(spacing: 20) {
+            ProgressView()
+                .scaleEffect(1.5)
+                .tint(.white)
+
+            Text("Initializing...")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundColor(.white.opacity(0.8))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Main session interface with session/localMedia passed as parameters
+    @ViewBuilder
+    private func sessionInterface(session: Session, localMedia: LocalMedia) -> some View {
+        ZStack(alignment: .top) {
+            if session.isConnected {
+                translationInterface(session: session, localMedia: localMedia)
+            } else {
+                connectingView(session: session, localMedia: localMedia)
+            }
+
+            // Close button overlay (always visible)
+            closeButton(session: session)
+                .padding()
+
+            errors(session: session, localMedia: localMedia)
+        }
+        .animation(.default, value: session.isConnected)
+    }
+
+    @ViewBuilder
+    private func closeButton(session: Session) -> some View {
         VStack {
             HStack {
                 Spacer()
                 Button {
                     Task { @MainActor in
                         print("🔴 Close button tapped")
-                        // End session first (if connected)
-                        if session.isConnected {
-                            print("🔴 Ending session...")
-                            do {
-                                await session.end()
-                                // Wait briefly for cleanup
-                                try await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
-                            } catch {
-                                print("⚠️ Session end error (non-fatal): \(error)")
-                            }
-                        }
+                        // Use the cleanup method
+                        await cleanupSession()
                         print("🔴 Dismissing view...")
                         dismiss()
                     }
@@ -296,82 +442,92 @@ public struct ZumuTranslatorView: View {
     }
 
     @ViewBuilder
-    private func connectingView() -> some View {
-        VStack(spacing: 8 * 4) {
-            Spacer()
+    private func connectingView(session: Session, localMedia: LocalMedia) -> some View {
+        ZStack {
+            // Waveform placeholder - makes start screen match translation UI
+            BarAudioVisualizer(audioTrack: nil,
+                               agentState: .listening,
+                               barCount: 5,
+                               barSpacingFactor: 0.05,
+                               barMinOpacity: 0.05)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 40)
+                .opacity(0.3) // Subtle, just for visual consistency
 
-            // Translation icon
-            Image(systemName: "translate")
-                .font(.system(size: 60))
-                .foregroundStyle(.blue)
+            VStack {
+                Spacer()
+
+                // Context indicator - shows translation participants
+                VStack(spacing: 4) {
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Driver")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.5))
+                            Text("\(config.driverName) (\(config.driverLanguage))")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.4))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Passenger")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.5))
+                            Text("\(config.passengerName) (\(config.passengerLanguage ?? "Auto"))")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                }
+                .background(Color.black.opacity(0.4))
+                .cornerRadius(12)
+                .padding(.horizontal, 40)
                 .padding(.bottom, 20)
 
-            // Translation context
-            VStack(spacing: 12) {
-                Text("AI Translation Ready")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary)
-
-                // Driver info
-                HStack(spacing: 8) {
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.blue)
-                    Text("\(config.driverName)")
-                        .fontWeight(.medium)
-                    Text("(\(config.driverLanguage))")
-                        .foregroundStyle(.secondary)
+                // Large, prominent start button
+                AsyncButton {
+                    await session.start()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 24))
+                        Text("Start Translation")
+                            .font(.system(size: 19, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.blue)
+                            .shadow(color: .blue.opacity(0.4), radius: 12, y: 6)
+                    )
+                    .foregroundColor(.white)
+                } busyLabel: {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Connecting...")
+                            .font(.system(size: 19, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.blue.opacity(0.8))
+                    )
+                    .foregroundColor(.white)
                 }
-
-                // Translation arrow
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 24))
-                    .foregroundStyle(.gray)
-                    .padding(.vertical, 4)
-
-                // Passenger info
-                HStack(spacing: 8) {
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.green)
-                    Text("\(config.passengerName)")
-                        .fontWeight(.medium)
-                    Text("(\(config.passengerLanguage ?? "Auto-detect"))")
-                        .foregroundStyle(.secondary)
-                }
+                .padding(.horizontal, 40)
+                .padding(.bottom, 40)
             }
-            .padding(.horizontal)
-
-            // Connect button
-            AsyncButton {
-                await session.start()
-            } label: {
-                HStack {
-                    Image(systemName: "mic.fill")
-                    Text("Start Translation")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(.blue)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            } busyLabel: {
-                HStack(spacing: 12) {
-                    ProgressView()
-                        .tint(.white)
-                    Text("Connecting...")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(.blue.opacity(0.8))
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            }
-            .padding(.horizontal, 40)
-            .padding(.top, 20)
-
-            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environmentObject(session)
@@ -379,44 +535,65 @@ public struct ZumuTranslatorView: View {
     }
 
     @ViewBuilder
-    private func translationInterface() -> some View {
+    private func translationInterface(session: Session, localMedia: LocalMedia) -> some View {
         VoiceInteractionView()
             .environmentObject(session)
             .environmentObject(localMedia)
-            .overlay(alignment: .bottom) {
-                listeningIndicator()
-                    .padding()
-            }
-            .safeAreaInset(edge: .bottom) {
-                ControlBar(chat: .constant(false))
-                    .environmentObject(session)
-                    .environmentObject(localMedia)
-                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
-                    .onDisconnect {
-                        // Dismiss when user taps disconnect
-                        dismiss()
+            .safeAreaInset(edge: .top, spacing: 0) {
+                // Context indicator - shows what data agent is using
+                VStack(spacing: 4) {
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Driver")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.5))
+                            Text("\(config.driverName) (\(config.driverLanguage))")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.4))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Passenger")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.5))
+                            Text("\(config.passengerName) (\(config.passengerLanguage ?? "Auto"))")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                }
+                .background(Color.black.opacity(0.4))
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    // Ultra-minimal transcript - just clean text at bottom
+                    TranscriptView()
+                        .frame(height: 120)
+                        .background(Color.black.opacity(0.3)) // Subtle, barely there
+                        .environmentObject(session)
+
+                    // Control bar
+                    ControlBar(chat: .constant(false))
+                        .environmentObject(session)
+                        .environmentObject(localMedia)
+                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                        .onDisconnect {
+                            dismiss()
+                        }
+                }
             }
     }
 
     @ViewBuilder
-    private func listeningIndicator() -> some View {
-        ZStack {
-            if session.messages.isEmpty,
-               !localMedia.isCameraEnabled,
-               !localMedia.isScreenShareEnabled
-            {
-                Text("Translation ready. Start speaking...")
-                    .font(.system(size: 15))
-                    .shimmering()
-                    .transition(.blurReplace)
-            }
-        }
-        .animation(.default, value: session.messages.isEmpty)
-    }
-
-    @ViewBuilder
-    private func errors() -> some View {
+    private func errors(session: Session, localMedia: LocalMedia) -> some View {
         if let error = session.error {
             ErrorView(error: error) { session.dismissError() }
         }
@@ -424,7 +601,7 @@ public struct ZumuTranslatorView: View {
         if let agentError = session.agent.error {
             ErrorView(error: agentError) {
                 Task {
-                    await session.end()
+                    await cleanupSession()
                     dismiss()
                 }
             }
