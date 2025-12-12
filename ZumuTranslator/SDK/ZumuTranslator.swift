@@ -280,7 +280,7 @@ public struct ZumuTranslatorView: View {
             let kind = await participant.kind
 
             if kind == .agent {
-                print("🔇 Found agent: \(identity ?? "unknown")")
+                print("🔇 Found agent: \(String(describing: identity))")
 
                 let audioTracks = await participant.audioTracks
                 for publication in audioTracks {
