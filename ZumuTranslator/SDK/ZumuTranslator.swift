@@ -205,7 +205,7 @@ public struct ZumuTranslatorView: View {
                         let identity = await participant.identity
                         print("   Participant: \(identity)")
                         let audioTracks = await participant.audioTracks
-                        for (_, publication) in audioTracks {
+                        for publication in audioTracks.values {
                             print("      Track: \(publication.sid ?? "no-sid")")
                             print("      Subscribed: \(publication.isSubscribed)")
                             print("      Muted: \(publication.isMuted)")
