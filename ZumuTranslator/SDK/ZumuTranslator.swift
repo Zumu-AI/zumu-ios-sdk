@@ -1,6 +1,7 @@
 import SwiftUI
 import LiveKit
 import LiveKitComponents
+import AVFoundation
 
 /// Main SDK entry point for Zumu Translation
 ///
@@ -145,14 +146,17 @@ public struct ZumuTranslatorView: View {
             baseURL: baseURL
         )
 
-        // Create session
+        // Create session with speaker audio output
         let session = Session(
             tokenSource: tokenSource.cached(),
             options: SessionOptions(
                 room: Room(
                     roomOptions: RoomOptions(
                         defaultAudioCaptureOptions: AudioCaptureOptions(),
-                        defaultAudioPublishOptions: AudioPublishOptions()
+                        defaultAudioPublishOptions: AudioPublishOptions(),
+                        defaultAudioOutputOptions: AudioOutputOptions(
+                            outputRoute: .speaker  // Force audio to speaker
+                        )
                     )
                 )
             )
@@ -183,6 +187,31 @@ public struct ZumuTranslatorView: View {
             print("🚀 Starting Zumu translation session")
             print("   Driver: \(config.driverName) (\(config.driverLanguage))")
             print("   Passenger: \(config.passengerName) (\(config.passengerLanguage ?? "Auto-detect"))")
+
+            // Configure audio session for speaker output
+            configureAudioSession()
+        }
+        .onDisappear {
+            print("🔴 SDK dismissed - cleaning up audio session")
+            // Deactivate audio session when SDK closes
+            do {
+                try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            } catch {
+                print("❌ Failed to deactivate audio session: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Audio Configuration
+
+    private func configureAudioSession() {
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+            try audioSession.setActive(true)
+            print("🔊 Audio session configured: speaker output enabled")
+        } catch {
+            print("❌ Failed to configure audio session: \(error)")
         }
     }
 
@@ -194,9 +223,16 @@ public struct ZumuTranslatorView: View {
                 Button {
                     Task { @MainActor in
                         print("🔴 Close button tapped")
+                        // End session first (if connected)
                         if session.isConnected {
                             print("🔴 Ending session...")
-                            await session.end()
+                            do {
+                                await session.end()
+                                // Wait briefly for cleanup
+                                try await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+                            } catch {
+                                print("⚠️ Session end error (non-fatal): \(error)")
+                            }
                         }
                         print("🔴 Dismissing view...")
                         dismiss()
