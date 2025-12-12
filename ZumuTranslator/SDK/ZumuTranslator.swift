@@ -206,12 +206,10 @@ public struct ZumuTranslatorView: View {
                         print("   Participant: \(identity)")
                         let audioTracks = await participant.audioTracks
                         for publication in audioTracks {
-                            print("      Track: \(publication.sid?.stringValue ?? "no-sid")")
+                            print("      Track: \(publication.sid.stringValue)")
                             print("      Subscribed: \(publication.isSubscribed)")
                             print("      Muted: \(publication.isMuted)")
-                            if let track = publication.track {
-                                print("      Track enabled: \(track.isEnabled)")
-                            }
+                            print("      Track exists: \(publication.track != nil)")
                         }
                     }
                 }
