@@ -188,6 +188,13 @@ public struct ZumuTranslatorView: View {
             // Configure audio session for speaker output
             configureAudioSession()
         }
+        .onChange(of: session.isConnected) { oldValue, newValue in
+            if newValue {
+                // Reconfigure audio when session connects
+                print("🔗 Session connected - ensuring speaker output")
+                configureAudioSession()
+            }
+        }
         .onDisappear {
             print("🔴 SDK dismissed - cleaning up audio session")
             // Deactivate audio session when SDK closes
@@ -204,9 +211,24 @@ public struct ZumuTranslatorView: View {
     private func configureAudioSession() {
         let audioSession = AVAudioSession.sharedInstance()
         do {
-            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
-            try audioSession.setActive(true)
+            // Configure for voice chat with speaker output
+            try audioSession.setCategory(
+                .playAndRecord,
+                mode: .videoChat,  // videoChat mode works better for remote audio
+                options: [
+                    .defaultToSpeaker,
+                    .allowBluetooth,
+                    .allowBluetoothA2DP,
+                    .mixWithOthers
+                ]
+            )
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+
+            // Explicitly override audio route to speaker
+            try audioSession.overrideOutputAudioPort(.speaker)
+
             print("🔊 Audio session configured: speaker output enabled")
+            print("🔊 Current route: \(audioSession.currentRoute.outputs.map { $0.portType.rawValue })")
         } catch {
             print("❌ Failed to configure audio session: \(error)")
         }
