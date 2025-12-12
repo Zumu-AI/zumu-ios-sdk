@@ -196,21 +196,38 @@ public struct ZumuTranslatorView: View {
                 print("🔗 Session connected - ensuring speaker output")
                 configureAudioSession()
 
-                // Log audio tracks
+                // Log audio tracks - wait longer for agent to publish
                 Task {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000) // Wait 1 second
+                    try? await Task.sleep(nanoseconds: 3_000_000_000) // Wait 3 seconds for agent to publish
                     let participants = await session.room.allParticipants
-                    print("🎵 Audio tracks status:")
+                    print("🎵 Audio tracks diagnostic:")
+                    print("🎵 Total participants: \(participants.count)")
+
                     for participant in participants.values {
                         let identity = await participant.identity
-                        print("   Participant: \(identity)")
+                        let kind = await participant.kind
+                        print("🎵 Participant: \(identity) (kind: \(kind))")
+
                         let audioTracks = await participant.audioTracks
+                        print("🎵    Audio tracks count: \(audioTracks.count)")
+
                         for publication in audioTracks {
-                            print("      Track: \(publication.sid.stringValue)")
-                            print("      Subscribed: \(publication.isSubscribed)")
-                            print("      Muted: \(publication.isMuted)")
-                            print("      Track exists: \(publication.track != nil)")
+                            print("🎵       Track SID: \(publication.sid.stringValue)")
+                            print("🎵       Subscribed: \(publication.isSubscribed)")
+                            print("🎵       Muted: \(publication.isMuted)")
+                            print("🎵       Track exists: \(publication.track != nil)")
+
+                            if let track = publication.track as? RemoteAudioTrack {
+                                print("🎵       RemoteAudioTrack found!")
+                            }
                         }
+                    }
+
+                    // Also check session.agent directly
+                    if let agentTrack = session.agent.audioTrack {
+                        print("🎵 Session.agent.audioTrack EXISTS: \(agentTrack)")
+                    } else {
+                        print("🎵 Session.agent.audioTrack is NIL")
                     }
                 }
             }
