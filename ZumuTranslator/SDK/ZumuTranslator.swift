@@ -118,10 +118,6 @@ public struct ZumuTranslatorView: View {
     // ✅ Changed from @StateObject to @State - allows fresh session creation
     @State private var session: Session?
     @State private var localMedia: LocalMedia?
-    // Manual connection state tracking (workaround for @State not observing Session.isConnected)
-    @State private var isSessionConnected: Bool = false
-    // Prevent duplicate start attempts
-    @State private var isConnecting: Bool = false
     // Prevent concurrent session operations (fixes crash on relaunch)
     @State private var isCleaningUp: Bool = false
     @Environment(\.dismiss) private var dismiss
@@ -151,10 +147,6 @@ public struct ZumuTranslatorView: View {
         }
 
         print("✅ Creating fresh session instance")
-
-        // Reset connection state for fresh start
-        self.isSessionConnected = false
-        self.isConnecting = false
 
         // Create ZumuTokenSource configuration
         let tokenConfig = ZumuTokenSource.TranslationConfig(
@@ -230,8 +222,6 @@ public struct ZumuTranslatorView: View {
         // Nil references to trigger deallocation
         self.session = nil
         self.localMedia = nil
-        self.isSessionConnected = false  // Reset manual state
-        self.isConnecting = false  // Reset connecting flag
 
         print("✅ Session cleanup complete")
     }
@@ -438,7 +428,7 @@ public struct ZumuTranslatorView: View {
     @ViewBuilder
     private func sessionInterface(session: Session, localMedia: LocalMedia) -> some View {
         ZStack(alignment: .top) {
-            if isSessionConnected {
+            if session.isConnected {
                 translationInterface(session: session, localMedia: localMedia)
             } else {
                 connectingView(session: session, localMedia: localMedia)
@@ -450,31 +440,7 @@ public struct ZumuTranslatorView: View {
 
             errors(session: session, localMedia: localMedia)
         }
-        .animation(.default, value: isSessionConnected)
-        .task {
-            // Monitor session connection state
-            // CRITICAL: Must explicitly run state updates on MainActor to trigger SwiftUI re-renders
-            print("🔍 Starting session connection monitor...")
-            while !Task.isCancelled {
-                let connected = session.isConnected
-                if connected != isSessionConnected {
-                    print("🔍 Session connection state changed: \(isSessionConnected) → \(connected)")
-
-                    // ✅ Explicit MainActor to ensure SwiftUI observes the change
-                    await MainActor.run {
-                        isSessionConnected = connected
-                        // Reset connecting flag when connection state changes
-                        if connected {
-                            print("✅ Connection established, resetting isConnecting flag")
-                            isConnecting = false
-                        }
-                    }
-                }
-                // Check every 100ms
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            print("🔍 Session connection monitor stopped")
-        }
+        .animation(.default, value: session.isConnected)
     }
 
     @ViewBuilder
