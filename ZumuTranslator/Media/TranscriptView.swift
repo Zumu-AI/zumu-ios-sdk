@@ -40,7 +40,7 @@ private struct TranscriptMessageView: View {
         // Clean, high-contrast text - larger for better readability with wrapping
         Text(messageText)
             .font(.system(size: isOlder ? 14 : 17, weight: isOlder ? .regular : .medium))
-            .foregroundColor(textColor.opacity(isOlder ? 0.4 : 1.0))
+            .foregroundStyle(textColor)
             .frame(maxWidth: .infinity, alignment: .leading)
             .multilineTextAlignment(.leading)
             .lineLimit(3)
@@ -68,12 +68,14 @@ private struct TranscriptMessageView: View {
         }
     }
 
-    private var textColor: Color {
+    private var textColor: some ShapeStyle {
         switch message.content {
         case .agentTranscript:
-            return .black.opacity(0.85) // Dark for AI responses on light background
+            // AI responses - primary color with reduced opacity for older messages
+            return isOlder ? AnyShapeStyle(.primary.opacity(0.4)) : AnyShapeStyle(.primary)
         case .userTranscript, .userInput:
-            return .black.opacity(0.65) // Slightly lighter for user input
+            // User input - secondary color (slightly dimmer than AI)
+            return isOlder ? AnyShapeStyle(.secondary.opacity(0.5)) : AnyShapeStyle(.secondary)
         }
     }
 }
