@@ -3,9 +3,11 @@
 ## [Latest] - December 16, 2025
 
 ### 🔧 Critical Threading Fixes
-- **Fixed MutexWrapper EXC_BREAKPOINT crash** - Added `@MainActor` annotations to all async session operations
+- **Fixed MutexWrapper EXC_BREAKPOINT crash** - Added `@MainActor` annotations to prevent concurrent access
+- **Fixed UI update blocking** - Removed redundant `@MainActor` from Task blocks that already inherit MainActor context
 - **Thread-safe session lifecycle** - All `@State` variable access now runs on main thread
 - **Concurrent access protection** - Added `isCleaningUp` flag to prevent race conditions
+- **UI state synchronization** - Connection monitor and diagnostics no longer block SwiftUI updates
 
 ### ✨ Major Improvements
 - **Proper Session initialization** - Session now created with complete `SessionOptions` including `RoomOptions`
@@ -62,6 +64,7 @@ None - All improvements are internal to SDK. Driver apps using the SDK don't nee
 
 ## Key Commits
 
+- `f57b245` - FIX: Remove redundant @MainActor annotations blocking UI updates
 - `3f2509d` - FIX: Add @MainActor annotations to prevent MutexWrapper crash
 - `84b1484` - Update SDK with latest improvements (Dec 16, 2025)
 - `51ccb13` - Fix iOS SDK crash with fresh session pattern (Phase 2)
