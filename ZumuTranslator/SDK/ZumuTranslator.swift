@@ -453,19 +453,21 @@ public struct ZumuTranslatorView: View {
         .animation(.default, value: isSessionConnected)
         .task {
             // Monitor session connection state
-            // This is a workaround because @State doesn't observe properties within Session
-            // .task already runs on MainActor in SwiftUI
+            // CRITICAL: Must explicitly run state updates on MainActor to trigger SwiftUI re-renders
             print("🔍 Starting session connection monitor...")
             while !Task.isCancelled {
                 let connected = session.isConnected
                 if connected != isSessionConnected {
                     print("🔍 Session connection state changed: \(isSessionConnected) → \(connected)")
-                    isSessionConnected = connected
 
-                    // Reset connecting flag when connection state changes
-                    if connected {
-                        print("✅ Connection established, resetting isConnecting flag")
-                        isConnecting = false
+                    // ✅ Explicit MainActor to ensure SwiftUI observes the change
+                    await MainActor.run {
+                        isSessionConnected = connected
+                        // Reset connecting flag when connection state changes
+                        if connected {
+                            print("✅ Connection established, resetting isConnecting flag")
+                            isConnecting = false
+                        }
                     }
                 }
                 // Check every 100ms
