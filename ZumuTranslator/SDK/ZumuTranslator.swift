@@ -142,6 +142,7 @@ public struct ZumuTranslatorView: View {
 
     /// Create a fresh session instance
     /// Called in onAppear to ensure clean state for each conversation
+    @MainActor
     private func createFreshSession() {
         // Guard against concurrent access
         guard !isCleaningUp else {
@@ -195,7 +196,7 @@ public struct ZumuTranslatorView: View {
         print("✅ Fresh session created - ready for connection")
 
         // Auto-start the session after a brief delay
-        Task {
+        Task { @MainActor in
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay for initialization
             print("🚀 Auto-starting connection for fresh conversation...")
             await newSession.start()
@@ -204,6 +205,7 @@ public struct ZumuTranslatorView: View {
 
     /// Complete cleanup of session and media
     /// Called in onDisappear to ensure proper resource deallocation
+    @MainActor
     private func cleanupSession() async {
         // Set flag to prevent concurrent operations
         isCleaningUp = true
@@ -273,18 +275,18 @@ public struct ZumuTranslatorView: View {
             forceAudioManagerConfiguration()
 
             // Log comprehensive audio state
-            Task {
+            Task { @MainActor in
                 await logAudioState(session: session)
             }
 
             // Wait for agent track, then force max volume
-            Task {
+            Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 2_000_000_000) // Wait 2 seconds
                 await forceTrackVolume(session: session)
             }
 
             // Log audio tracks - wait longer for agent to publish
-            Task {
+            Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 3_000_000_000) // Wait 3 seconds for agent to publish
                 let participants = await session.room.allParticipants
                 print("🎵 Audio tracks diagnostic:")
@@ -321,7 +323,7 @@ public struct ZumuTranslatorView: View {
         .onDisappear {
             print("🔴 SDK dismissed - cleaning up session")
             // ✅ Use new cleanup method
-            Task {
+            Task { @MainActor in
                 await cleanupSession()
             }
             // AudioManager will handle audio session cleanup automatically
@@ -446,7 +448,7 @@ public struct ZumuTranslatorView: View {
             errors(session: session, localMedia: localMedia)
         }
         .animation(.default, value: isSessionConnected)
-        .task {
+        .task { @MainActor in
             // Monitor session connection state
             // This is a workaround because @State doesn't observe properties within Session
             print("🔍 Starting session connection monitor...")
@@ -619,7 +621,7 @@ public struct ZumuTranslatorView: View {
 
         if let agentError = session.agent.error {
             ErrorView(error: agentError) {
-                Task {
+                Task { @MainActor in
                     await cleanupSession()
                     dismiss()
                 }
