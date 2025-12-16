@@ -4,10 +4,10 @@
 
 ### 🔧 Critical Threading Fixes
 - **Fixed MutexWrapper EXC_BREAKPOINT crash** - Added `@MainActor` annotations to prevent concurrent access
-- **Fixed SwiftUI not observing state changes** - Use explicit `await MainActor.run {}` for @State updates in async contexts
+- **Fixed UI not switching to translation view** - Reverted to using `session.isConnected` directly instead of manual polling
 - **Thread-safe session lifecycle** - All `@State` variable access now runs on main thread
 - **Concurrent access protection** - Added `isCleaningUp` flag to prevent race conditions
-- **UI state synchronization** - Connection monitor properly triggers SwiftUI re-renders on connection state changes
+- **Proper LiveKit observation** - SwiftUI observes LiveKit's published properties automatically (no manual state tracking needed)
 
 ### ✨ Major Improvements
 - **Proper Session initialization** - Session now created with complete `SessionOptions` including `RoomOptions`
@@ -64,11 +64,12 @@ None - All improvements are internal to SDK. Driver apps using the SDK don't nee
 
 ## Key Commits
 
-- `c073365` - FIX: Use explicit MainActor.run for state updates in connection monitor
-- `f57b245` - FIX: Remove redundant @MainActor annotations blocking UI updates (superseded by c073365)
+- `3393262` - REVERT: Use session.isConnected directly - remove broken manual polling (WORKING FIX)
+- `c073365` - FIX: Use explicit MainActor.run for state updates (superseded by 3393262)
+- `f57b245` - FIX: Remove redundant @MainActor annotations (superseded by 3393262)
 - `3f2509d` - FIX: Add @MainActor annotations to prevent MutexWrapper crash
 - `84b1484` - Update SDK with latest improvements (Dec 16, 2025)
-- `51ccb13` - Fix iOS SDK crash with fresh session pattern (Phase 2)
+- `51ccb13` - Fix iOS SDK crash with fresh session pattern (Phase 2) - LAST KNOWN WORKING VERSION
 - `3f4afc4` - CRITICAL FIX: Remove custom AVAudioSession - let LiveKit handle it
 
 ---

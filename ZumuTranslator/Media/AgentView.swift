@@ -12,9 +12,11 @@ struct AgentView: View {
     @SceneStorage("videoTransition") private var videoTransition = false
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 24) {
             Spacer()
+                .frame(minHeight: 40) // Top spacing
 
+            // Waveform visualization - moved higher
             ZStack {
             if let avatarVideoTrack = session.agent.avatarVideoTrack {
                 SwiftUIVideoView(avatarVideoTrack)
@@ -42,8 +44,8 @@ struct AgentView: View {
                                    barCount: 5,
                                    barSpacingFactor: 0.08,
                                    barMinOpacity: 0.15)
-                    .frame(maxWidth: .infinity, maxHeight: 280) // Reduced from 420pt
-                    .padding(.horizontal, 60) // More side padding for elegance
+                    .frame(maxWidth: .infinity, maxHeight: 240) // Reduced height
+                    .padding(.horizontal, 60)
                     .transition(.opacity)
             } else if session.isConnected {
                 // Placeholder waveform - matches agent view configuration
@@ -52,7 +54,7 @@ struct AgentView: View {
                                    barCount: 5,
                                    barSpacingFactor: 0.08,
                                    barMinOpacity: 0.15)
-                    .frame(maxWidth: .infinity, maxHeight: 280)
+                    .frame(maxWidth: .infinity, maxHeight: 240)
                     .padding(.horizontal, 60)
                     .transition(.opacity)
             }
@@ -60,15 +62,17 @@ struct AgentView: View {
             .animation(.snappy, value: session.agent.audioTrack?.id)
             .modifier(NamespaceEffectModifier(namespace: namespace))
 
-            // Agent state indicator
+            // Agent state indicator - with dark mode support
             Text(stateText)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.black.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.6)) // Adaptive color for dark mode
                 .tracking(0.8)
                 .textCase(.uppercase)
                 .animation(.easeInOut(duration: 0.3), value: session.agent.agentState)
+                .padding(.bottom, 8) // Extra spacing above transcript
 
             Spacer()
+                .frame(minHeight: 80) // Bottom spacing - prevents overlap with transcript
         }
     }
 

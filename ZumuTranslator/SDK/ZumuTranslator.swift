@@ -118,6 +118,10 @@ public struct ZumuTranslatorView: View {
     // ✅ Changed from @StateObject to @State - allows fresh session creation
     @State private var session: Session?
     @State private var localMedia: LocalMedia?
+    // Manual connection state tracking (workaround for @State not observing Session.isConnected)
+    @State private var isSessionConnected: Bool = false
+    // Prevent duplicate start attempts
+    @State private var isConnecting: Bool = false
     // Prevent concurrent session operations (fixes crash on relaunch)
     @State private var isCleaningUp: Bool = false
     @Environment(\.dismiss) private var dismiss
@@ -138,7 +142,6 @@ public struct ZumuTranslatorView: View {
 
     /// Create a fresh session instance
     /// Called in onAppear to ensure clean state for each conversation
-    @MainActor
     private func createFreshSession() {
         // Guard against concurrent access
         guard !isCleaningUp else {
@@ -147,6 +150,10 @@ public struct ZumuTranslatorView: View {
         }
 
         print("✅ Creating fresh session instance")
+
+        // Reset connection state for fresh start
+        self.isSessionConnected = false
+        self.isConnecting = false
 
         // Create ZumuTokenSource configuration
         let tokenConfig = ZumuTokenSource.TranslationConfig(
@@ -188,7 +195,6 @@ public struct ZumuTranslatorView: View {
         print("✅ Fresh session created - ready for connection")
 
         // Auto-start the session after a brief delay
-        // createFreshSession() is already @MainActor, so Task inherits it
         Task {
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay for initialization
             print("🚀 Auto-starting connection for fresh conversation...")
@@ -198,7 +204,6 @@ public struct ZumuTranslatorView: View {
 
     /// Complete cleanup of session and media
     /// Called in onDisappear to ensure proper resource deallocation
-    @MainActor
     private func cleanupSession() async {
         // Set flag to prevent concurrent operations
         isCleaningUp = true
@@ -222,6 +227,8 @@ public struct ZumuTranslatorView: View {
         // Nil references to trigger deallocation
         self.session = nil
         self.localMedia = nil
+        self.isSessionConnected = false  // Reset manual state
+        self.isConnecting = false  // Reset connecting flag
 
         print("✅ Session cleanup complete")
     }
@@ -266,7 +273,6 @@ public struct ZumuTranslatorView: View {
             forceAudioManagerConfiguration()
 
             // Log comprehensive audio state
-            // .onAppear already runs on MainActor in SwiftUI
             Task {
                 await logAudioState(session: session)
             }
@@ -315,7 +321,6 @@ public struct ZumuTranslatorView: View {
         .onDisappear {
             print("🔴 SDK dismissed - cleaning up session")
             // ✅ Use new cleanup method
-            // .onDisappear already runs on MainActor, and cleanupSession() is @MainActor
             Task {
                 await cleanupSession()
             }
@@ -428,7 +433,7 @@ public struct ZumuTranslatorView: View {
     @ViewBuilder
     private func sessionInterface(session: Session, localMedia: LocalMedia) -> some View {
         ZStack(alignment: .top) {
-            if session.isConnected {
+            if isSessionConnected {
                 translationInterface(session: session, localMedia: localMedia)
             } else {
                 connectingView(session: session, localMedia: localMedia)
@@ -440,7 +445,28 @@ public struct ZumuTranslatorView: View {
 
             errors(session: session, localMedia: localMedia)
         }
-        .animation(.default, value: session.isConnected)
+        .animation(.default, value: isSessionConnected)
+        .task {
+            // Monitor session connection state
+            // This is a workaround because @State doesn't observe properties within Session
+            print("🔍 Starting session connection monitor...")
+            while !Task.isCancelled {
+                let connected = session.isConnected
+                if connected != isSessionConnected {
+                    print("🔍 Session connection state changed: \(isSessionConnected) → \(connected)")
+                    isSessionConnected = connected
+
+                    // Reset connecting flag when connection state changes
+                    if connected {
+                        print("✅ Connection established, resetting isConnecting flag")
+                        isConnecting = false
+                    }
+                }
+                // Check every 100ms
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            print("🔍 Session connection monitor stopped")
+        }
     }
 
     @ViewBuilder
@@ -484,30 +510,30 @@ public struct ZumuTranslatorView: View {
             VStack {
                 Spacer()
 
-                // Clean text - no boxes, no shadows, perfect contrast
+                // Clean text - adaptive for dark mode
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("DRIVER")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.black.opacity(0.4))
+                            .foregroundStyle(.secondary)
                             .tracking(1.2)
                         Text("\(config.driverName) · \(config.driverLanguage)")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.black.opacity(0.85))
+                            .foregroundStyle(.primary)
                     }
 
                     Image(systemName: "arrow.left.arrow.right")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.black.opacity(0.25))
+                        .foregroundStyle(.tertiary)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("PASSENGER")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.black.opacity(0.4))
+                            .foregroundStyle(.secondary)
                             .tracking(1.2)
                         Text("\(config.passengerName) · \(config.passengerLanguage ?? "Auto")")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.black.opacity(0.85))
+                            .foregroundStyle(.primary)
                     }
                 }
                 .padding(.horizontal, 32)
@@ -516,10 +542,10 @@ public struct ZumuTranslatorView: View {
                 // Auto-connecting indicator
                 HStack(spacing: 12) {
                     ProgressView()
-                        .tint(.black.opacity(0.4))
+                        .tint(.secondary)
                     Text("Connecting...")
                         .font(.system(size: 17, weight: .medium))
-                        .foregroundColor(.black.opacity(0.5))
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.bottom, 40)
             }
@@ -535,30 +561,30 @@ public struct ZumuTranslatorView: View {
             .environmentObject(session)
             .environmentObject(localMedia)
             .safeAreaInset(edge: .top, spacing: 0) {
-                // Clean, minimal text - no boxes, no shadows
+                // Clean, minimal text - adaptive for dark mode
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("DRIVER")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.black.opacity(0.4))
+                            .foregroundStyle(.secondary)
                             .tracking(1.2)
                         Text("\(config.driverName) · \(config.driverLanguage)")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.black.opacity(0.85))
+                            .foregroundStyle(.primary)
                     }
 
                     Image(systemName: "arrow.left.arrow.right")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.black.opacity(0.25))
+                        .foregroundStyle(.tertiary)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("PASSENGER")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.black.opacity(0.4))
+                            .foregroundStyle(.secondary)
                             .tracking(1.2)
                         Text("\(config.passengerName) · \(config.passengerLanguage ?? "Auto")")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.black.opacity(0.85))
+                            .foregroundStyle(.primary)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -593,7 +619,7 @@ public struct ZumuTranslatorView: View {
 
         if let agentError = session.agent.error {
             ErrorView(error: agentError) {
-                Task { @MainActor in
+                Task {
                     await cleanupSession()
                     dismiss()
                 }
