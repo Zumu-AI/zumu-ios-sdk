@@ -8,24 +8,28 @@ struct LocalParticipantView: View {
 
     var body: some View {
         if let cameraTrack = localMedia.cameraTrack {
-            SwiftUIVideoView(cameraTrack)
-                .clipShape(RoundedRectangle(cornerRadius: .cornerRadiusPerPlatform))
-                .aspectRatio(cameraTrack.aspectRatio, contentMode: .fit)
-                .shadow(radius: 20, y: 10)
-                .transition(.scale.combined(with: .opacity))
-                .overlay(alignment: .bottomTrailing) {
-                    if localMedia.canSwitchCamera {
-                        AsyncButton(action: localMedia.switchCamera) {
-                            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
-                                .padding(2 * .grid)
-                                .foregroundStyle(.fg0)
-                                .background(.bg1.opacity(0.8))
-                                .clipShape(Circle())
+            Group {
+                SwiftUIVideoView(cameraTrack)
+                    .clipShape(RoundedRectangle(cornerRadius: .cornerRadiusPerPlatform))
+                    .aspectRatio(cameraTrack.aspectRatio, contentMode: .fit)
+                    .shadow(radius: 20, y: 10)
+                    .transition(.scale.combined(with: .opacity))
+                    .overlay(alignment: .bottomTrailing) {
+                        if localMedia.canSwitchCamera {
+                            AsyncButton(action: localMedia.switchCamera) {
+                                Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                                    .padding(2 * .grid)
+                                    .foregroundStyle(.fg0)
+                                    .background(.bg1.opacity(0.8))
+                                    .clipShape(Circle())
+                            }
+                            .padding(2 * .grid)
                         }
-                        .padding(2 * .grid)
                     }
-                }
-                .matchedGeometryEffect(id: "camera", in: namespace!)
+            }
+            .if(namespace != nil) { view in
+                view.matchedGeometryEffect(id: "camera", in: namespace!)
+            }
         }
     }
 }

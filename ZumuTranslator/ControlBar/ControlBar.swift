@@ -15,8 +15,9 @@ struct ControlBar: View {
     @Environment(\.onDisconnect) private var onDisconnect
 
     private enum Constants {
-        static let buttonWidth: CGFloat = 16 * .grid
-        static let buttonHeight: CGFloat = 11 * .grid
+        // Enlarged for better visibility in translation UI
+        static let buttonWidth: CGFloat = 24 * .grid  // 192pt (was 128pt)
+        static let buttonHeight: CGFloat = 16 * .grid // 128pt (was 88pt)
     }
 
     var body: some View {
@@ -76,16 +77,17 @@ struct ControlBar: View {
         HStack(spacing: .zero) {
             Spacer()
             AsyncButton(action: localMedia.toggleMicrophone) {
-                HStack(spacing: .grid) {
+                HStack(spacing: 1.5 * .grid) {
                     Image(systemName: localMedia.isMicrophoneEnabled ? "microphone.fill" : "microphone.slash.fill")
+                        .font(.system(size: 32, weight: .medium)) // Enlarged icon
                         .transition(.symbolEffect)
-                    BarAudioVisualizer(audioTrack: localMedia.microphoneTrack, barColor: .fg1, barCount: 3, barSpacingFactor: 0.1)
-                        .frame(width: 2 * .grid, height: 0.5 * Constants.buttonHeight)
+                    BarAudioVisualizer(audioTrack: localMedia.microphoneTrack, barColor: .fg1, barCount: 3, barSpacingFactor: 0.15)
+                        .frame(width: 4 * .grid, height: 0.6 * Constants.buttonHeight) // Larger waveform
                         .frame(maxHeight: .infinity)
                         .id(localMedia.microphoneTrack?.id)
                 }
                 .frame(height: Constants.buttonHeight)
-                .padding(.horizontal, 2 * .grid)
+                .padding(.horizontal, 3 * .grid)
                 .contentShape(Rectangle())
             }
             #if os(macOS)
@@ -107,6 +109,7 @@ struct ControlBar: View {
             onDisconnect?()
         } label: {
             Image(systemName: "phone.down.fill")
+                .font(.system(size: 32, weight: .medium)) // Enlarged icon to match microphone
                 .frame(width: Constants.buttonWidth, height: Constants.buttonHeight)
                 .contentShape(Rectangle())
         }

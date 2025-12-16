@@ -118,6 +118,12 @@ public struct ZumuTranslatorView: View {
     // ✅ Changed from @StateObject to @State - allows fresh session creation
     @State private var session: Session?
     @State private var localMedia: LocalMedia?
+    // Manual connection state tracking (workaround for @State not observing Session.isConnected)
+    @State private var isSessionConnected: Bool = false
+    // Prevent duplicate start attempts
+    @State private var isConnecting: Bool = false
+    // Prevent concurrent session operations (fixes crash on relaunch)
+    @State private var isCleaningUp: Bool = false
     @Environment(\.dismiss) private var dismiss
 
     public init(
@@ -137,7 +143,17 @@ public struct ZumuTranslatorView: View {
     /// Create a fresh session instance
     /// Called in onAppear to ensure clean state for each conversation
     private func createFreshSession() {
+        // Guard against concurrent access
+        guard !isCleaningUp else {
+            print("⚠️ Skipping createFreshSession - cleanup in progress")
+            return
+        }
+
         print("✅ Creating fresh session instance")
+
+        // Reset connection state for fresh start
+        self.isSessionConnected = false
+        self.isConnecting = false
 
         // Create ZumuTokenSource configuration
         let tokenConfig = ZumuTokenSource.TranslationConfig(
@@ -157,9 +173,17 @@ public struct ZumuTranslatorView: View {
             baseURL: baseURL
         )
 
-        // Create session with minimal options (let LiveKit handle everything)
+        // Create session with fresh token (no caching - each open is a new conversation)
         let newSession = Session(
-            tokenSource: tokenSource.cached()
+            tokenSource: tokenSource,
+            options: SessionOptions(
+                room: Room(
+                    roomOptions: RoomOptions(
+                        defaultAudioCaptureOptions: AudioCaptureOptions(),
+                        defaultAudioPublishOptions: AudioPublishOptions()
+                    )
+                )
+            )
         )
 
         let newLocalMedia = LocalMedia(session: newSession)
@@ -169,11 +193,22 @@ public struct ZumuTranslatorView: View {
         self.localMedia = newLocalMedia
 
         print("✅ Fresh session created - ready for connection")
+
+        // Auto-start the session after a brief delay
+        Task {
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay for initialization
+            print("🚀 Auto-starting connection for fresh conversation...")
+            await newSession.start()
+        }
     }
 
     /// Complete cleanup of session and media
     /// Called in onDisappear to ensure proper resource deallocation
     private func cleanupSession() async {
+        // Set flag to prevent concurrent operations
+        isCleaningUp = true
+        defer { isCleaningUp = false }  // Always reset flag when done
+
         print("🧹 Starting session cleanup")
 
         guard let session = session else {
@@ -192,6 +227,8 @@ public struct ZumuTranslatorView: View {
         // Nil references to trigger deallocation
         self.session = nil
         self.localMedia = nil
+        self.isSessionConnected = false  // Reset manual state
+        self.isConnecting = false  // Reset connecting flag
 
         print("✅ Session cleanup complete")
     }
@@ -396,7 +433,7 @@ public struct ZumuTranslatorView: View {
     @ViewBuilder
     private func sessionInterface(session: Session, localMedia: LocalMedia) -> some View {
         ZStack(alignment: .top) {
-            if session.isConnected {
+            if isSessionConnected {
                 translationInterface(session: session, localMedia: localMedia)
             } else {
                 connectingView(session: session, localMedia: localMedia)
@@ -408,7 +445,28 @@ public struct ZumuTranslatorView: View {
 
             errors(session: session, localMedia: localMedia)
         }
-        .animation(.default, value: session.isConnected)
+        .animation(.default, value: isSessionConnected)
+        .task {
+            // Monitor session connection state
+            // This is a workaround because @State doesn't observe properties within Session
+            print("🔍 Starting session connection monitor...")
+            while !Task.isCancelled {
+                let connected = session.isConnected
+                if connected != isSessionConnected {
+                    print("🔍 Session connection state changed: \(isSessionConnected) → \(connected)")
+                    isSessionConnected = connected
+
+                    // Reset connecting flag when connection state changes
+                    if connected {
+                        print("✅ Connection established, resetting isConnecting flag")
+                        isConnecting = false
+                    }
+                }
+                // Check every 100ms
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            print("🔍 Session connection monitor stopped")
+        }
     }
 
     @ViewBuilder
@@ -426,13 +484,8 @@ public struct ZumuTranslatorView: View {
                     }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.white)
-                        .background(
-                            Circle()
-                                .fill(.black.opacity(0.5))
-                                .frame(width: 32, height: 32)
-                        )
+                        .font(.system(size: 36, weight: .regular))
+                        .foregroundStyle(.black.opacity(0.4))
                 }
                 .buttonStyle(.plain)
             }
@@ -444,88 +497,56 @@ public struct ZumuTranslatorView: View {
     @ViewBuilder
     private func connectingView(session: Session, localMedia: LocalMedia) -> some View {
         ZStack {
-            // Waveform placeholder - makes start screen match translation UI
+            // Subtle waveform placeholder - minimal presence
             BarAudioVisualizer(audioTrack: nil,
                                agentState: .listening,
                                barCount: 5,
-                               barSpacingFactor: 0.05,
+                               barSpacingFactor: 0.08,
                                barMinOpacity: 0.05)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 40)
-                .opacity(0.3) // Subtle, just for visual consistency
+                .frame(maxWidth: .infinity, maxHeight: 280)
+                .padding(.horizontal, 60)
+                .opacity(0.2) // Very subtle
 
             VStack {
                 Spacer()
 
-                // Context indicator - shows translation participants
-                VStack(spacing: 4) {
-                    HStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Driver")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.5))
-                            Text("\(config.driverName) (\(config.driverLanguage))")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white.opacity(0.8))
-                        }
-
-                        Image(systemName: "arrow.left.arrow.right")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.4))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Passenger")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.5))
-                            Text("\(config.passengerName) (\(config.passengerLanguage ?? "Auto"))")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white.opacity(0.8))
-                        }
+                // Clean text - no boxes, no shadows, perfect contrast
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("DRIVER")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.4))
+                            .tracking(1.2)
+                        Text("\(config.driverName) · \(config.driverLanguage)")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.85))
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
+
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.black.opacity(0.25))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PASSENGER")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.4))
+                            .tracking(1.2)
+                        Text("\(config.passengerName) · \(config.passengerLanguage ?? "Auto")")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.85))
+                    }
                 }
-                .background(Color.black.opacity(0.4))
-                .cornerRadius(12)
-                .padding(.horizontal, 40)
-                .padding(.bottom, 20)
+                .padding(.horizontal, 32)
+                .padding(.bottom, 24)
 
-                // Large, prominent start button
-                AsyncButton {
-                    await session.start()
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 24))
-                        Text("Start Translation")
-                            .font(.system(size: 19, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.blue)
-                            .shadow(color: .blue.opacity(0.4), radius: 12, y: 6)
-                    )
-                    .foregroundColor(.white)
-                } busyLabel: {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                            .tint(.white)
-                        Text("Connecting...")
-                            .font(.system(size: 19, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.blue.opacity(0.8))
-                    )
-                    .foregroundColor(.white)
+                // Auto-connecting indicator
+                HStack(spacing: 12) {
+                    ProgressView()
+                        .tint(.black.opacity(0.4))
+                    Text("Connecting...")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundColor(.black.opacity(0.5))
                 }
-                .padding(.horizontal, 40)
                 .padding(.bottom, 40)
             }
         }
@@ -540,44 +561,42 @@ public struct ZumuTranslatorView: View {
             .environmentObject(session)
             .environmentObject(localMedia)
             .safeAreaInset(edge: .top, spacing: 0) {
-                // Context indicator - shows what data agent is using
-                VStack(spacing: 4) {
-                    HStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Driver")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.5))
-                            Text("\(config.driverName) (\(config.driverLanguage))")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white.opacity(0.8))
-                        }
-
-                        Image(systemName: "arrow.left.arrow.right")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.4))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Passenger")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.5))
-                            Text("\(config.passengerName) (\(config.passengerLanguage ?? "Auto"))")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white.opacity(0.8))
-                        }
+                // Clean, minimal text - no boxes, no shadows
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("DRIVER")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.4))
+                            .tracking(1.2)
+                        Text("\(config.driverName) · \(config.driverLanguage)")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.85))
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
+
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.black.opacity(0.25))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PASSENGER")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.4))
+                            .tracking(1.2)
+                        Text("\(config.passengerName) · \(config.passengerLanguage ?? "Auto")")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.85))
+                    }
                 }
-                .background(Color.black.opacity(0.4))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    // Ultra-minimal transcript - just clean text at bottom
+                    // Clean transcript - no background, larger text, only last 2 messages
                     TranscriptView()
-                        .frame(height: 120)
-                        .background(Color.black.opacity(0.3)) // Subtle, barely there
+                        .frame(minHeight: 140, maxHeight: 180)
+                        .padding(.bottom, 24)
                         .environmentObject(session)
 
                     // Control bar

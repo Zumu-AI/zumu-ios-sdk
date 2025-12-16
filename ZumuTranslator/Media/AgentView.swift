@@ -12,7 +12,10 @@ struct AgentView: View {
     @SceneStorage("videoTransition") private var videoTransition = false
 
     var body: some View {
-        ZStack {
+        VStack(spacing: 16) {
+            Spacer()
+
+            ZStack {
             if let avatarVideoTrack = session.agent.avatarVideoTrack {
                 SwiftUIVideoView(avatarVideoTrack)
                     .clipShape(RoundedRectangle(cornerRadius: .cornerRadiusPerPlatform))
@@ -33,81 +36,56 @@ struct AgentView: View {
                         videoTransition = true
                     }
             } else if let audioTrack = session.agent.audioTrack {
+                // Clean, minimal waveform - professional proportions
                 BarAudioVisualizer(audioTrack: audioTrack,
                                    agentState: session.agent.agentState ?? .listening,
                                    barCount: 5,
-                                   barSpacingFactor: 0.05,
-                                   barMinOpacity: 0.1)
-                    .frame(maxWidth: 75 * .grid, maxHeight: 48 * .grid)
+                                   barSpacingFactor: 0.08,
+                                   barMinOpacity: 0.15)
+                    .frame(maxWidth: .infinity, maxHeight: 280) // Reduced from 420pt
+                    .padding(.horizontal, 60) // More side padding for elegance
                     .transition(.opacity)
             } else if session.isConnected {
+                // Placeholder waveform - matches agent view configuration
                 BarAudioVisualizer(audioTrack: nil,
                                    agentState: .listening,
-                                   barCount: 1,
-                                   barMinOpacity: 0.1)
-                    .frame(maxWidth: 10.5 * .grid, maxHeight: 48 * .grid)
+                                   barCount: 5,
+                                   barSpacingFactor: 0.08,
+                                   barMinOpacity: 0.15)
+                    .frame(maxWidth: .infinity, maxHeight: 280)
+                    .padding(.horizontal, 60)
                     .transition(.opacity)
             }
-        }
-        .animation(.snappy, value: session.agent.audioTrack?.id)
-        .modifier(NamespaceEffectModifier(namespace: namespace))
-        .overlay(alignment: .top) {
-            if let config = translationConfig {
-                VStack(spacing: 12) {
-                    // Title
-                    HStack(spacing: 6) {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 14))
-                        Text("Live Translation")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundColor(.white)
-
-                    // Translation participants
-                    HStack(spacing: 12) {
-                        // Driver
-                        VStack(spacing: 4) {
-                            Image(systemName: "person.circle.fill")
-                                .font(.system(size: 24))
-                                .foregroundStyle(.blue)
-                            Text(config.driverName)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                            Text(config.driverLanguage)
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
-
-                        // Translation arrow
-                        Image(systemName: "arrow.left.arrow.right")
-                            .font(.system(size: 20))
-                            .foregroundStyle(.white.opacity(0.6))
-
-                        // Passenger
-                        VStack(spacing: 4) {
-                            Image(systemName: "person.circle.fill")
-                                .font(.system(size: 24))
-                                .foregroundStyle(.green)
-                            Text(config.passengerName)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                            Text(config.passengerLanguage ?? "Auto")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
-                    }
-                    .foregroundColor(.white)
-                }
-                .padding(.vertical, 16)
-                .padding(.horizontal, 20)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(.ultraThinMaterial)
-                        .shadow(color: .black.opacity(0.2), radius: 10, y: 5)
-                )
-                .padding(.top, 60)
             }
+            .animation(.snappy, value: session.agent.audioTrack?.id)
+            .modifier(NamespaceEffectModifier(namespace: namespace))
+
+            // Agent state indicator
+            Text(stateText)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.black.opacity(0.5))
+                .tracking(0.8)
+                .textCase(.uppercase)
+                .animation(.easeInOut(duration: 0.3), value: session.agent.agentState)
+
+            Spacer()
+        }
+    }
+
+    private var stateText: String {
+        guard let state = session.agent.agentState else {
+            return "Connecting"
+        }
+
+        switch state {
+        case .listening:
+            return "Listening"
+        case .thinking:
+            return "Thinking"
+        case .speaking:
+            return "Translating"
+        default:
+            return ""
         }
     }
 }
