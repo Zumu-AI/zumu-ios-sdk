@@ -196,7 +196,8 @@ public struct ZumuTranslatorView: View {
         print("✅ Fresh session created - ready for connection")
 
         // Auto-start the session after a brief delay
-        Task { @MainActor in
+        // createFreshSession() is already @MainActor, so Task inherits it
+        Task {
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay for initialization
             print("🚀 Auto-starting connection for fresh conversation...")
             await newSession.start()
@@ -275,18 +276,19 @@ public struct ZumuTranslatorView: View {
             forceAudioManagerConfiguration()
 
             // Log comprehensive audio state
-            Task { @MainActor in
+            // .onAppear already runs on MainActor in SwiftUI
+            Task {
                 await logAudioState(session: session)
             }
 
             // Wait for agent track, then force max volume
-            Task { @MainActor in
+            Task {
                 try? await Task.sleep(nanoseconds: 2_000_000_000) // Wait 2 seconds
                 await forceTrackVolume(session: session)
             }
 
             // Log audio tracks - wait longer for agent to publish
-            Task { @MainActor in
+            Task {
                 try? await Task.sleep(nanoseconds: 3_000_000_000) // Wait 3 seconds for agent to publish
                 let participants = await session.room.allParticipants
                 print("🎵 Audio tracks diagnostic:")
@@ -323,7 +325,8 @@ public struct ZumuTranslatorView: View {
         .onDisappear {
             print("🔴 SDK dismissed - cleaning up session")
             // ✅ Use new cleanup method
-            Task { @MainActor in
+            // .onDisappear already runs on MainActor, and cleanupSession() is @MainActor
+            Task {
                 await cleanupSession()
             }
             // AudioManager will handle audio session cleanup automatically
@@ -448,9 +451,10 @@ public struct ZumuTranslatorView: View {
             errors(session: session, localMedia: localMedia)
         }
         .animation(.default, value: isSessionConnected)
-        .task { @MainActor in
+        .task {
             // Monitor session connection state
             // This is a workaround because @State doesn't observe properties within Session
+            // .task already runs on MainActor in SwiftUI
             print("🔍 Starting session connection monitor...")
             while !Task.isCancelled {
                 let connected = session.isConnected
