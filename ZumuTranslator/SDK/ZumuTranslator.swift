@@ -286,16 +286,20 @@ public struct ZumuTranslatorView: View {
             // Log audio tracks - wait longer for agent to publish
             Task {
                 try? await Task.sleep(nanoseconds: 3_000_000_000) // Wait 3 seconds for agent to publish
-                let participants = await session.room.allParticipants
+                let participants = session.room.allParticipants
                 print("🎵 Audio tracks diagnostic:")
                 print("🎵 Total participants: \(participants.count)")
 
                 for participant in participants.values {
-                    let identity = await participant.identity
-                    let kind = await participant.kind
-                    print("🎵 Participant: \(identity) (kind: \(kind))")
+                    let identity = participant.identity
+                    let kind = participant.kind
+                    // Make optionals explicit to avoid debug-description interpolation
+                    let identityDesc = identity?.stringValue ?? "nil"
+                    let kindDesc = kind.description
 
-                    let audioTracks = await participant.audioTracks
+                    print("🎵 Participant: \(identityDesc) (kind: \(kindDesc))")
+
+                    let audioTracks = participant.audioTracks
                     print("🎵    Audio tracks count: \(audioTracks.count)")
 
                     for publication in audioTracks {
@@ -304,7 +308,7 @@ public struct ZumuTranslatorView: View {
                         print("🎵       Muted: \(publication.isMuted)")
                         print("🎵       Track exists: \(publication.track != nil)")
 
-                        if let track = publication.track as? RemoteAudioTrack {
+                        if publication.track is RemoteAudioTrack {
                             print("🎵       RemoteAudioTrack found!")
                         }
                     }

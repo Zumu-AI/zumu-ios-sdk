@@ -2,12 +2,12 @@ import LiveKit
 import Foundation
 
 /// Token source that calls Zumu backend API for LiveKit tokens
-public class ZumuTokenSource: TokenSourceConfigurable {
+public final class ZumuTokenSource: TokenSourceConfigurable, Sendable {
     private let apiKey: String
     private let baseURL: String
     private let config: TranslationConfig
 
-    public struct TranslationConfig {
+    public struct TranslationConfig: Sendable {
         public let driverName: String
         public let driverLanguage: String
         public let passengerName: String
