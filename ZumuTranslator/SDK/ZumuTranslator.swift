@@ -30,21 +30,12 @@ private class SessionCoordinator {
             // oldSession.isConnected read attempts to acquire Room mutex while disconnect holds it
             // Just use fixed delay instead - await oldSession.end() already waits for completion
             print("📋 SessionCoordinator: Waiting for cleanup to complete...")
-            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s fixed delay
+            try? await Task.sleep(nanoseconds: 1_000_000_000)  // 1s delay to allow AudioManager cleanup
             print("✅ SessionCoordinator: Old session cleanup complete")
 
-            // CRITICAL: Deactivate audio session to free audio resources
-            print("📋 SessionCoordinator: Deactivating audio session...")
-            let audioSession = AVAudioSession.sharedInstance()
-            do {
-                try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
-                print("✅ SessionCoordinator: Audio session deactivated")
-            } catch {
-                print("⚠️ SessionCoordinator: Failed to deactivate audio session: \(error)")
-            }
-
-            // Extra safety delay to ensure audio engine resources are freed
-            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
+            // REMOVED: Aggressive audio session deactivation causes AudioManager.State destructor crash
+            // LiveKit's AudioManager handles audio session cleanup properly during disconnect
+            // Forcibly calling audioSession.setActive(false) invalidates AudioManager's audio references
         }
 
         // Register new session
