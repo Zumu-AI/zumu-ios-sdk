@@ -103,10 +103,10 @@ struct ControlBar: View {
     @ViewBuilder
     private func disconnectButton() -> some View {
         AsyncButton {
+            // ✅ Simple disconnect - onDisappear handles cleanup
+            print("📞 Disconnect button pressed")
             await session.end()
-            session.restoreMessageHistory([])
-            // Call dismiss callback if provided (for SDK integration)
-            onDisconnect?()
+            onDisconnect?()  // Dismiss SDK
         } label: {
             Image(systemName: "phone.down.fill")
                 .font(.system(size: 32, weight: .medium)) // Enlarged icon to match microphone

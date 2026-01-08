@@ -2,6 +2,75 @@ import SwiftUI
 import LiveKit
 import LiveKitComponents
 import AVFoundation
+import Combine
+
+// MARK: - Session Coordinator
+
+/// Singleton that coordinates session lifecycle to prevent overlapping sessions
+/// Ensures old session fully disconnects before allowing new session to start
+@MainActor
+private class SessionCoordinator {
+    static let shared = SessionCoordinator()
+
+    private(set) var isSessionActive = false
+    private var activeSession: Session?
+
+    private init() {}
+
+    /// Register a new session and ensure old one is cleaned up
+    func registerSession(_ session: Session) async {
+        print("📋 SessionCoordinator: Registering new session")
+
+        // If there's an active session, end it first
+        if let oldSession = activeSession, isSessionActive {
+            print("📋 SessionCoordinator: Ending previous session...")
+            await oldSession.end()
+
+            // Wait for disconnect to complete
+            var attempts = 0
+            while oldSession.isConnected && attempts < 20 {
+                print("📋 SessionCoordinator: Waiting for disconnect (attempt \(attempts + 1)/20)...")
+                try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1s
+                attempts += 1
+            }
+
+            if oldSession.isConnected {
+                print("⚠️ SessionCoordinator: Old session still connected after timeout")
+            } else {
+                print("✅ SessionCoordinator: Old session disconnected")
+            }
+
+            // CRITICAL: Deactivate audio session to free audio resources
+            print("📋 SessionCoordinator: Deactivating audio session...")
+            let audioSession = AVAudioSession.sharedInstance()
+            do {
+                try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+                print("✅ SessionCoordinator: Audio session deactivated")
+            } catch {
+                print("⚠️ SessionCoordinator: Failed to deactivate audio session: \(error)")
+            }
+
+            // Extra safety delay to ensure audio engine resources are freed
+            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
+        }
+
+        // Register new session
+        activeSession = session
+        isSessionActive = true
+        print("✅ SessionCoordinator: New session registered and ready")
+    }
+
+    /// Unregister session when it's done
+    func unregisterSession(_ session: Session) {
+        if activeSession === session {
+            print("📋 SessionCoordinator: Unregistering session")
+            activeSession = nil
+            isSessionActive = false
+        }
+    }
+}
+
+// MARK: - Main SDK Entry Point
 
 /// Main SDK entry point for Zumu Translation
 ///
@@ -108,22 +177,16 @@ public class ZumuTranslator {
 
 // MARK: - SwiftUI View
 
-/// Main translation interface view
+/// Main translation interface view wrapper
+/// Uses Container Pattern with .id() to force complete view recreation for each session
 /// Can be presented as a sheet, fullScreenCover, or NavigationLink destination
 public struct ZumuTranslatorView: View {
     public let config: ZumuTranslator.TranslationConfig
     public let apiKey: String
     public let baseURL: String
 
-    // ✅ Changed from @StateObject to @State - allows fresh session creation
-    @State private var session: Session?
-    @State private var localMedia: LocalMedia?
-    // Manual connection state tracking (workaround for @State not observing Session.isConnected)
-    @State private var isSessionConnected: Bool = false
-    // Prevent duplicate start attempts
-    @State private var isConnecting: Bool = false
-    // Prevent concurrent session operations (fixes crash on relaunch)
-    @State private var isCleaningUp: Bool = false
+    // Key to force view recreation - new UUID for each session
+    @State private var sessionKey = UUID()
     @Environment(\.dismiss) private var dismiss
 
     public init(
@@ -134,28 +197,49 @@ public struct ZumuTranslatorView: View {
         self.config = config
         self.apiKey = apiKey
         self.baseURL = baseURL
-        // ✅ Don't create session in init - wait for onAppear
-        // This allows creating fresh sessions for each conversation
     }
 
-    // MARK: - Session Lifecycle
-
-    /// Create a fresh session instance
-    /// Called in onAppear to ensure clean state for each conversation
-    private func createFreshSession() {
-        // Guard against concurrent access
-        guard !isCleaningUp else {
-            print("⚠️ Skipping createFreshSession - cleanup in progress")
-            return
+    public var body: some View {
+        ZumuTranslatorSessionView(
+            config: config,
+            apiKey: apiKey,
+            baseURL: baseURL,
+            onDismiss: dismiss
+        )
+        .id(sessionKey)  // ✅ Forces complete recreation
+        .onDisappear {
+            // Generate new ID for next appearance - ensures fresh session
+            sessionKey = UUID()
         }
+    }
+}
 
-        print("✅ Creating fresh session instance")
+// MARK: - Session View (Internal)
 
-        // Reset connection state for fresh start
-        self.isSessionConnected = false
-        self.isConnecting = false
+/// Internal session view that manages LiveKit Session lifecycle
+/// Created fresh for each conversation via .id() modifier
+private struct ZumuTranslatorSessionView: View {
+    // ✅ Proper @StateObject for ObservableObject lifecycle
+    @StateObject private var session: Session
+    @StateObject private var localMedia: LocalMedia
 
-        // Create ZumuTokenSource configuration
+    // Track if cleanup has been initiated (prevents double cleanup)
+    @State private var isCleaningUp = false
+
+    let config: ZumuTranslator.TranslationConfig
+    let onDismiss: DismissAction
+
+    // ✅ Create session in init (proper @StateObject pattern)
+    init(
+        config: ZumuTranslator.TranslationConfig,
+        apiKey: String,
+        baseURL: String,
+        onDismiss: DismissAction
+    ) {
+        self.config = config
+        self.onDismiss = onDismiss
+
+        // Create token source
         let tokenConfig = ZumuTokenSource.TranslationConfig(
             driverName: config.driverName,
             driverLanguage: config.driverLanguage,
@@ -166,14 +250,13 @@ public struct ZumuTranslatorView: View {
             dropoffLocation: config.dropoffLocation
         )
 
-        // Create token source
         let tokenSource = ZumuTokenSource(
             apiKey: apiKey,
             config: tokenConfig,
             baseURL: baseURL
         )
 
-        // Create session with fresh token (no caching - each open is a new conversation)
+        // Create fresh session
         let newSession = Session(
             tokenSource: tokenSource,
             options: SessionOptions(
@@ -186,68 +269,21 @@ public struct ZumuTranslatorView: View {
             )
         )
 
-        let newLocalMedia = LocalMedia(session: newSession)
-
-        // Set state
-        self.session = newSession
-        self.localMedia = newLocalMedia
-
-        print("✅ Fresh session created - ready for connection")
-
-        // Auto-start the session after a brief delay
-        Task {
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay for initialization
-            print("🚀 Auto-starting connection for fresh conversation...")
-            await newSession.start()
-        }
+        _session = StateObject(wrappedValue: newSession)
+        _localMedia = StateObject(wrappedValue: LocalMedia(session: newSession))
     }
 
-    /// Complete cleanup of session and media
-    /// Called in onDisappear to ensure proper resource deallocation
-    private func cleanupSession() async {
-        // Set flag to prevent concurrent operations
-        isCleaningUp = true
-        defer { isCleaningUp = false }  // Always reset flag when done
+    // MARK: - Session Lifecycle
 
-        print("🧹 Starting session cleanup")
-
-        guard let session = session else {
-            print("🧹 No session to cleanup")
-            return
-        }
-
-        if session.isConnected {
-            print("🧹 Ending connected session...")
-            await session.end()
-        }
-
-        // Allow cleanup time for WebRTC to fully teardown
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 second
-
-        // Nil references to trigger deallocation
-        self.session = nil
-        self.localMedia = nil
-        self.isSessionConnected = false  // Reset manual state
-        self.isConnecting = false  // Reset connecting flag
-
-        print("✅ Session cleanup complete")
-    }
+    // MARK: - Simplified Lifecycle (No manual cleanup needed - SwiftUI handles it)
 
     public var body: some View {
-        // ✅ Guard rendering until session is created
-        Group {
-            if let session = session, let localMedia = localMedia {
-                // Session exists - show interface
-                sessionInterface(session: session, localMedia: localMedia)
-            } else {
-                // No session yet - show loading
-                loadingView()
-            }
-        }
+        // ✅ Session always exists (created in init)
+        sessionInterface(session: session, localMedia: localMedia)
         .environment(\.translationConfig, config)
         .background(.bg1)
         .onAppear {
-            print("🚀 Starting Zumu translation session")
+            print("🚀 Starting fresh translation session")
             print("   Driver: \(config.driverName) (\(config.driverLanguage))")
             print("   Passenger: \(config.passengerName) (\(config.passengerLanguage ?? "Auto-detect"))")
 
@@ -257,79 +293,57 @@ public struct ZumuTranslatorView: View {
             print("⚠️ For full audio functionality, please test on a physical iOS device")
             #endif
 
-            // ✅ Create fresh session instance
-            createFreshSession()
+            // ✅ Coordinate session lifecycle to prevent overlaps
+            Task {
+                // Register with coordinator - will wait for old session to cleanup
+                await SessionCoordinator.shared.registerSession(session)
 
-            // Force AudioManager configuration BEFORE connecting
+                // Now it's safe to start
+                print("   Starting new session...")
+                await session.start()
+            }
+
+            // Force AudioManager configuration
             forceAudioManagerConfiguration()
         }
-        .onChange(of: session?.isConnected) { oldValue, newValue in
-            // ✅ Handle optional session
-            guard let session = session, newValue == true else { return }
+        .onChange(of: session.isConnected) { oldValue, newValue in
+            guard newValue == true else { return }
 
             print("🔗 Session connected")
-
             // Reconfigure AudioManager after connection
             forceAudioManagerConfiguration()
-
-            // Log comprehensive audio state
-            Task {
-                await logAudioState(session: session)
-            }
-
-            // Wait for agent track, then force max volume
-            Task {
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // Wait 2 seconds
-                await forceTrackVolume(session: session)
-            }
-
-            // Log audio tracks - wait longer for agent to publish
-            Task {
-                try? await Task.sleep(nanoseconds: 3_000_000_000) // Wait 3 seconds for agent to publish
-                let participants = session.room.allParticipants
-                print("🎵 Audio tracks diagnostic:")
-                print("🎵 Total participants: \(participants.count)")
-
-                for participant in participants.values {
-                    let identity = participant.identity
-                    let kind = participant.kind
-                    // Make optionals explicit to avoid debug-description interpolation
-                    let identityDesc = identity?.stringValue ?? "nil"
-                    let kindDesc = kind.description
-
-                    print("🎵 Participant: \(identityDesc) (kind: \(kindDesc))")
-
-                    let audioTracks = participant.audioTracks
-                    print("🎵    Audio tracks count: \(audioTracks.count)")
-
-                    for publication in audioTracks {
-                        print("🎵       Track SID: \(publication.sid.stringValue)")
-                        print("🎵       Subscribed: \(publication.isSubscribed)")
-                        print("🎵       Muted: \(publication.isMuted)")
-                        print("🎵       Track exists: \(publication.track != nil)")
-
-                        if publication.track is RemoteAudioTrack {
-                            print("🎵       RemoteAudioTrack found!")
-                        }
-                    }
-                }
-
-                // Also check session.agent directly
-                if let agentTrack = session.agent.audioTrack {
-                    print("🎵 Session.agent.audioTrack EXISTS: \(agentTrack)")
-                } else {
-                    print("🎵 Session.agent.audioTrack is NIL")
-                }
-            }
         }
+        // ✅ Diagnostic tasks using .task modifiers (auto-cancelled by SwiftUI)
+        .task {
+            guard session.isConnected else { return }
+            await logAudioState(session: session)
+        }
+        .task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard session.isConnected else { return }
+            await forceTrackVolume(session: session)
+        }
+        // Diagnostic task removed - was accessing session.room.allParticipants during disconnect causing recursive mutex lock
         .onDisappear {
-            print("🔴 SDK dismissed - cleaning up session")
-            // ✅ Use new cleanup method
-            Task {
-                await cleanupSession()
+            print("🔴 Session view disappearing")
+            // ✅ Prevent double cleanup if disconnect button already initiated it
+            guard !isCleaningUp else {
+                print("   Cleanup already initiated, skipping")
+                return
             }
-            // AudioManager will handle audio session cleanup automatically
-            // Do NOT manually deactivate AVAudioSession as it conflicts with AudioManager
+            isCleaningUp = true
+
+            // ✅ Following LiveKit pattern: Just call end() and trust async cleanup
+            // DON'T poll session.isConnected - causes mutex deadlock during cleanup
+            Task {
+                print("   Calling session.end()...")
+                await session.end()
+                print("✅ Session.end() completed")
+
+                // Unregister from coordinator
+                await SessionCoordinator.shared.unregisterSession(session)
+            }
+            // SwiftUI will deallocate @StateObject automatically after Tasks are cancelled
         }
     }
 
@@ -437,7 +451,7 @@ public struct ZumuTranslatorView: View {
     @ViewBuilder
     private func sessionInterface(session: Session, localMedia: LocalMedia) -> some View {
         ZStack(alignment: .top) {
-            if isSessionConnected {
+            if session.isConnected {
                 translationInterface(session: session, localMedia: localMedia)
             } else {
                 connectingView(session: session, localMedia: localMedia)
@@ -449,28 +463,7 @@ public struct ZumuTranslatorView: View {
 
             errors(session: session, localMedia: localMedia)
         }
-        .animation(.default, value: isSessionConnected)
-        .task {
-            // Monitor session connection state
-            // This is a workaround because @State doesn't observe properties within Session
-            print("🔍 Starting session connection monitor...")
-            while !Task.isCancelled {
-                let connected = session.isConnected
-                if connected != isSessionConnected {
-                    print("🔍 Session connection state changed: \(isSessionConnected) → \(connected)")
-                    isSessionConnected = connected
-
-                    // Reset connecting flag when connection state changes
-                    if connected {
-                        print("✅ Connection established, resetting isConnecting flag")
-                        isConnecting = false
-                    }
-                }
-                // Check every 100ms
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            print("🔍 Session connection monitor stopped")
-        }
+        .animation(.default, value: session.isConnected)
     }
 
     @ViewBuilder
@@ -479,13 +472,8 @@ public struct ZumuTranslatorView: View {
             HStack {
                 Spacer()
                 Button {
-                    Task { @MainActor in
-                        print("🔴 Close button tapped")
-                        // Use the cleanup method
-                        await cleanupSession()
-                        print("🔴 Dismissing view...")
-                        dismiss()
-                    }
+                    print("🔴 Close button tapped")
+                    onDismiss()  // ✅ Simple dismissal - onDisappear handles cleanup
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 36, weight: .regular))
@@ -609,7 +597,7 @@ public struct ZumuTranslatorView: View {
                         .environmentObject(localMedia)
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                         .onDisconnect {
-                            dismiss()
+                            onDismiss()
                         }
                 }
             }
@@ -623,10 +611,8 @@ public struct ZumuTranslatorView: View {
 
         if let agentError = session.agent.error {
             ErrorView(error: agentError) {
-                Task {
-                    await cleanupSession()
-                    dismiss()
-                }
+                // ✅ Simple dismissal - onDisappear handles cleanup
+                onDismiss()
             }
         }
 
