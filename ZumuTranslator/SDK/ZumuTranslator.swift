@@ -210,6 +210,9 @@ private struct ZumuTranslatorSessionView: View {
     // Track if cleanup has been initiated (prevents double cleanup)
     @State private var isCleaningUp = false
 
+    // Cache connection state to avoid reading session.isConnected during disconnect (causes mutex deadlock)
+    @State private var isConnectedCache: Bool = false
+
     let config: ZumuTranslator.TranslationConfig
     let onDismiss: DismissAction
 
@@ -285,6 +288,10 @@ private struct ZumuTranslatorSessionView: View {
                 // Now it's safe to start
                 print("   Starting new session...")
                 await session.start()
+
+                // Cache connection state (safe: one-time read after start completes)
+                isConnectedCache = session.isConnected
+                print("   ✅ Session connected, cache updated")
             }
 
             // Force AudioManager configuration
@@ -300,6 +307,10 @@ private struct ZumuTranslatorSessionView: View {
                 return
             }
             isCleaningUp = true
+
+            // CRITICAL: Set cache to false BEFORE calling session.end() to prevent view from reading session.isConnected
+            isConnectedCache = false
+            print("   ✅ Connection cache cleared")
 
             // ✅ Following LiveKit pattern: Just call end() and trust async cleanup
             // DON'T poll session.isConnected - causes mutex deadlock during cleanup
@@ -375,7 +386,8 @@ private struct ZumuTranslatorSessionView: View {
     @ViewBuilder
     private func sessionInterface(session: Session, localMedia: LocalMedia) -> some View {
         ZStack(alignment: .top) {
-            if session.isConnected {
+            // Use cached state instead of session.isConnected to prevent mutex deadlock during disconnect
+            if isConnectedCache {
                 translationInterface(session: session, localMedia: localMedia)
             } else {
                 connectingView(session: session, localMedia: localMedia)
