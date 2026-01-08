@@ -477,7 +477,7 @@ private struct ZumuTranslatorSessionView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 36, weight: .regular))
-                        .foregroundStyle(.black.opacity(0.4))
+                        .foregroundStyle(.primary.opacity(0.4))
                 }
                 .buttonStyle(.plain)
             }
