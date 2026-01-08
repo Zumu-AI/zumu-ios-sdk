@@ -26,19 +26,12 @@ private class SessionCoordinator {
             print("📋 SessionCoordinator: Ending previous session...")
             await oldSession.end()
 
-            // Wait for disconnect to complete
-            var attempts = 0
-            while oldSession.isConnected && attempts < 20 {
-                print("📋 SessionCoordinator: Waiting for disconnect (attempt \(attempts + 1)/20)...")
-                try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1s
-                attempts += 1
-            }
-
-            if oldSession.isConnected {
-                print("⚠️ SessionCoordinator: Old session still connected after timeout")
-            } else {
-                print("✅ SessionCoordinator: Old session disconnected")
-            }
+            // REMOVED POLLING LOOP - was causing recursive mutex lock during disconnect
+            // oldSession.isConnected read attempts to acquire Room mutex while disconnect holds it
+            // Just use fixed delay instead - await oldSession.end() already waits for completion
+            print("📋 SessionCoordinator: Waiting for cleanup to complete...")
+            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s fixed delay
+            print("✅ SessionCoordinator: Old session cleanup complete")
 
             // CRITICAL: Deactivate audio session to free audio resources
             print("📋 SessionCoordinator: Deactivating audio session...")
