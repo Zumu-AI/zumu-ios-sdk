@@ -313,17 +313,7 @@ private struct ZumuTranslatorSessionView: View {
             // Reconfigure AudioManager after connection
             forceAudioManagerConfiguration()
         }
-        // ✅ Diagnostic tasks using .task modifiers (auto-cancelled by SwiftUI)
-        .task {
-            guard session.isConnected else { return }
-            await logAudioState(session: session)
-        }
-        .task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard session.isConnected else { return }
-            await forceTrackVolume(session: session)
-        }
-        // Diagnostic task removed - was accessing session.room.allParticipants during disconnect causing recursive mutex lock
+        // All diagnostic tasks removed - any access to session properties during disconnect can cause recursive mutex lock
         .onDisappear {
             print("🔴 Session view disappearing")
             // ✅ Prevent double cleanup if disconnect button already initiated it
