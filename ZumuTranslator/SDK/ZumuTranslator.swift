@@ -306,13 +306,7 @@ private struct ZumuTranslatorSessionView: View {
             // Force AudioManager configuration
             forceAudioManagerConfiguration()
         }
-        .onChange(of: session.isConnected) { oldValue, newValue in
-            guard newValue == true else { return }
-
-            print("🔗 Session connected")
-            // Reconfigure AudioManager after connection
-            forceAudioManagerConfiguration()
-        }
+        // REMOVED: .onChange(of: session.isConnected) - reactive observer causes recursive mutex lock during disconnect
         // All diagnostic tasks removed - any access to session properties during disconnect can cause recursive mutex lock
         .onDisappear {
             print("🔴 Session view disappearing")
@@ -331,49 +325,13 @@ private struct ZumuTranslatorSessionView: View {
                 print("✅ Session.end() completed")
 
                 // Unregister from coordinator
-                await SessionCoordinator.shared.unregisterSession(session)
+                SessionCoordinator.shared.unregisterSession(session)
             }
             // SwiftUI will deallocate @StateObject automatically after Tasks are cancelled
         }
     }
 
-    // MARK: - Audio Debugging & Configuration
-
-    private func logAudioState(session: Session) async {
-        print("🔊 ===== COMPREHENSIVE AUDIO DIAGNOSTICS =====")
-
-        // 1. AVAudioSession State
-        let audioSession = AVAudioSession.sharedInstance()
-        let route = audioSession.currentRoute
-        print("🔊 AVAudioSession:")
-        print("🔊   Category: \(audioSession.category.rawValue)")
-        print("🔊   Mode: \(audioSession.mode.rawValue)")
-        print("🔊   Route: \(route.outputs.map { $0.portType.rawValue }.joined(separator: ", "))")
-        print("🔊   Volume: \(audioSession.outputVolume)")
-        print("🔊   Is other audio playing: \(audioSession.isOtherAudioPlaying)")
-
-        // 2. AudioManager State (CRITICAL)
-        print("🔊 AudioManager:")
-        print("🔊   Auto config enabled: \(AudioManager.shared.audioSession.isAutomaticConfigurationEnabled)")
-        print("🔊   Engine running: \(AudioManager.shared.isEngineRunning)")
-        print("🔊   Manual rendering mode: \(AudioManager.shared.isManualRenderingMode)")
-        print("🔊   Speaker output preferred: \(AudioManager.shared.isSpeakerOutputPreferred)")
-
-        // 3. Mixer State
-        print("🔊 Mixer:")
-        print("🔊   Output volume: \(AudioManager.shared.mixer.outputVolume)")
-
-        // 4. Remote Audio Track State
-        if let agentTrack = session.agent.audioTrack as? RemoteAudioTrack {
-            print("🔊 Remote Track:")
-            print("🔊   Track volume: \(agentTrack.volume)")
-            print("🔊   Track: \(agentTrack)")
-        } else {
-            print("🔊 ❌ Agent audio track is NIL or wrong type")
-        }
-
-        print("🔊 =========================================")
-    }
+    // MARK: - Audio Configuration
 
     private func forceAudioManagerConfiguration() {
         print("🔧 Forcing AudioManager configuration...")
@@ -412,14 +370,6 @@ private struct ZumuTranslatorSessionView: View {
         print("🔧 AudioManager configuration complete")
     }
 
-    private func forceTrackVolume(session: Session) async {
-        if let agentTrack = session.agent.audioTrack as? RemoteAudioTrack {
-            print("🔊 Setting agent track volume to MAXIMUM")
-            agentTrack.volume = 1.0
-            print("🔊 ✅ Agent track volume: \(agentTrack.volume)")
-        }
-    }
-
     // MARK: - View Helpers
 
     /// Loading view shown while session is being created
@@ -453,7 +403,7 @@ private struct ZumuTranslatorSessionView: View {
 
             errors(session: session, localMedia: localMedia)
         }
-        .animation(.default, value: session.isConnected)
+        // REMOVED: .animation(.default, value: session.isConnected) - reactive observer causes recursive mutex lock during disconnect
     }
 
     @ViewBuilder
