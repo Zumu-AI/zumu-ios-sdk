@@ -1,8 +1,38 @@
 import SwiftUI
 import LiveKit
 import LiveKitComponents
+import LiveKitKrispNoiseFilter
 import AVFoundation
 import Combine
+
+// MARK: - Krisp Noise Filter Manager
+
+/// Manages Krisp noise filter processor
+/// Stored globally to prevent deallocation during session lifecycle
+@MainActor
+private class KrispManager {
+    static let shared = KrispManager()
+
+    /// Krisp processor for noise cancellation
+    /// CRITICAL: Must be retained to prevent deallocation
+    let processor = LiveKitKrispNoiseFilter()
+
+    private init() {
+        print("🎙️ KrispManager: Noise filter processor initialized")
+    }
+
+    /// Configure Krisp processor for the audio manager
+    func configure() {
+        AudioManager.shared.capturePostProcessingDelegate = processor
+        print("🎙️ KrispManager: Configured as audio capture post-processor")
+    }
+
+    /// Add processor as room delegate for lifecycle management
+    func attachToRoom(_ room: Room) {
+        room.add(delegate: processor)
+        print("🎙️ KrispManager: Attached to room as delegate")
+    }
+}
 
 // MARK: - Session Coordinator
 
@@ -350,6 +380,9 @@ private struct ZumuTranslatorSessionView: View {
                 // Register with coordinator (simple registration - cleanup already done)
                 SessionCoordinator.shared.registerSession(session)
 
+                // Attach Krisp processor to room for lifecycle management
+                KrispManager.shared.attachToRoom(session.room)
+
                 // Start the session
                 print("   Starting new session...")
                 await session.start()
@@ -401,6 +434,9 @@ private struct ZumuTranslatorSessionView: View {
 
     private func forceAudioManagerConfiguration() {
         print("🔧 Forcing AudioManager configuration...")
+
+        // Configure Krisp noise filter for microphone input
+        KrispManager.shared.configure()
 
         // Ensure automatic configuration is enabled
         AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = true
