@@ -8,6 +8,10 @@ import Combine
 
 /// Singleton that coordinates session lifecycle to prevent overlapping sessions
 /// Ensures old session fully disconnects before allowing new session to start
+///
+/// KEY INSIGHT FROM WEB CLIENT: The web LiveKitRoom component doesn't create
+/// resources until it's ready. We do the same - gate Session/LocalMedia creation
+/// behind this coordinator's readiness check.
 @MainActor
 private class SessionCoordinator {
     static let shared = SessionCoordinator()
@@ -15,33 +19,43 @@ private class SessionCoordinator {
     private(set) var isSessionActive = false
     private var activeSession: Session?
 
+    /// Tracks if we're in the middle of cleanup - prevents new session creation
+    private(set) var isCleaningUp = false
+
     private init() {}
 
-    /// Register a new session and ensure old one is cleaned up
-    func registerSession(_ session: Session) async {
-        print("📋 SessionCoordinator: Registering new session")
+    /// CRITICAL: Call this BEFORE creating new Session/LocalMedia
+    /// This ensures old session's LocalMedia.deinit completes before new LocalMedia.init
+    /// Prevents recursive mutex lock on AudioManager.onDeviceUpdate
+    func prepareForNewSession() async {
+        print("📋 SessionCoordinator: Preparing for new session...")
 
         // If there's an active session, end it first
         if let oldSession = activeSession, isSessionActive {
+            isCleaningUp = true
             print("📋 SessionCoordinator: Ending previous session...")
             await oldSession.end()
 
-            // REMOVED POLLING LOOP - was causing recursive mutex lock during disconnect
-            // oldSession.isConnected read attempts to acquire Room mutex while disconnect holds it
-            // Just use fixed delay instead - await oldSession.end() already waits for completion
-            print("📋 SessionCoordinator: Waiting for cleanup to complete...")
-            try? await Task.sleep(nanoseconds: 1_000_000_000)  // 1s delay to allow AudioManager cleanup
-            print("✅ SessionCoordinator: Old session cleanup complete")
+            // Wait for LocalMedia.deinit to complete (AudioManager cleanup)
+            // This is the KEY fix - LocalMedia.deinit must complete before new LocalMedia.init
+            print("📋 SessionCoordinator: Waiting for LocalMedia cleanup...")
+            try? await Task.sleep(nanoseconds: 800_000_000)  // 800ms for deinit to complete
 
-            // REMOVED: Aggressive audio session deactivation causes AudioManager.State destructor crash
-            // LiveKit's AudioManager handles audio session cleanup properly during disconnect
-            // Forcibly calling audioSession.setActive(false) invalidates AudioManager's audio references
+            activeSession = nil
+            isSessionActive = false
+            isCleaningUp = false
+            print("✅ SessionCoordinator: Old session fully cleaned up")
         }
 
-        // Register new session
+        print("✅ SessionCoordinator: Ready for new session")
+    }
+
+    /// Register a new session (called after prepareForNewSession)
+    func registerSession(_ session: Session) {
+        print("📋 SessionCoordinator: Registering new session")
         activeSession = session
         isSessionActive = true
-        print("✅ SessionCoordinator: New session registered and ready")
+        print("✅ SessionCoordinator: New session registered")
     }
 
     /// Unregister session when it's done
@@ -164,6 +178,10 @@ public class ZumuTranslator {
 /// Main translation interface view wrapper
 /// Uses Container Pattern with .id() to force complete view recreation for each session
 /// Can be presented as a sheet, fullScreenCover, or NavigationLink destination
+///
+/// KEY FIX (inspired by web client): Gates Session/LocalMedia creation behind
+/// SessionCoordinator readiness. This ensures old LocalMedia.deinit completes
+/// BEFORE new LocalMedia.init runs, preventing recursive mutex lock crash.
 public struct ZumuTranslatorView: View {
     public let config: ZumuTranslator.TranslationConfig
     public let apiKey: String
@@ -171,6 +189,10 @@ public struct ZumuTranslatorView: View {
 
     // Key to force view recreation - new UUID for each session
     @State private var sessionKey = UUID()
+
+    // Gate: Don't create SessionView until old session is fully cleaned up
+    @State private var isReadyForSession = false
+
     @Environment(\.dismiss) private var dismiss
 
     public init(
@@ -184,17 +206,51 @@ public struct ZumuTranslatorView: View {
     }
 
     public var body: some View {
-        ZumuTranslatorSessionView(
-            config: config,
-            apiKey: apiKey,
-            baseURL: baseURL,
-            onDismiss: dismiss
-        )
-        .id(sessionKey)  // ✅ Forces complete recreation
+        Group {
+            if isReadyForSession {
+                // Only create SessionView (and thus Session/LocalMedia) when ready
+                ZumuTranslatorSessionView(
+                    config: config,
+                    apiKey: apiKey,
+                    baseURL: baseURL,
+                    onDismiss: dismiss
+                )
+                .id(sessionKey)  // Forces complete recreation
+            } else {
+                // Show preparing view while waiting for old session cleanup
+                preparingView
+            }
+        }
+        .onAppear {
+            print("🎬 ZumuTranslatorView appearing")
+            Task {
+                // CRITICAL: Wait for old session cleanup BEFORE creating new Session/LocalMedia
+                // This prevents LocalMedia init/deinit overlap (recursive mutex crash)
+                await SessionCoordinator.shared.prepareForNewSession()
+                isReadyForSession = true
+                print("✅ Ready to create new session")
+            }
+        }
         .onDisappear {
-            // Generate new ID for next appearance - ensures fresh session
+            print("🎬 ZumuTranslatorView disappearing")
+            // Reset for next appearance
+            isReadyForSession = false
             sessionKey = UUID()
         }
+    }
+
+    /// Minimal preparing view shown while waiting for old session cleanup
+    private var preparingView: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.2)
+                .tint(.secondary)
+            Text("Preparing...")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.bg1)
     }
 }
 
@@ -283,12 +339,17 @@ private struct ZumuTranslatorSessionView: View {
             print("⚠️ For full audio functionality, please test on a physical iOS device")
             #endif
 
-            // ✅ Coordinate session lifecycle to prevent overlaps
-            Task {
-                // Register with coordinator - will wait for old session to cleanup
-                await SessionCoordinator.shared.registerSession(session)
+            // Force AudioManager configuration BEFORE starting session
+            forceAudioManagerConfiguration()
 
-                // Now it's safe to start
+            // Register and start session
+            // NOTE: prepareForNewSession() already completed in parent view
+            // so it's safe to create Session/LocalMedia now (no overlap with old ones)
+            Task {
+                // Register with coordinator (simple registration - cleanup already done)
+                SessionCoordinator.shared.registerSession(session)
+
+                // Start the session
                 print("   Starting new session...")
                 await session.start()
 
@@ -297,9 +358,6 @@ private struct ZumuTranslatorSessionView: View {
                 cachedMessages = session.messages
                 print("   ✅ Session connected, cache updated")
             }
-
-            // Force AudioManager configuration
-            forceAudioManagerConfiguration()
         }
         // REMOVED: .onChange(of: session.isConnected) - reactive observer causes recursive mutex lock during disconnect
         // All diagnostic tasks removed - any access to session properties during disconnect can cause recursive mutex lock
