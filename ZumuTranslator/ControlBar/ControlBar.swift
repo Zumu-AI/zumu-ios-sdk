@@ -5,10 +5,11 @@ import LiveKitComponents
 /// - SeeAlso: ``AgentFeatures``
 struct ControlBar: View {
     @EnvironmentObject private var session: Session
-    @EnvironmentObject private var localMedia: LocalMedia
 
     @Binding var chat: Bool
     let isConnected: Bool  // Pass from parent to avoid reading session.isConnected during disconnect
+    @Binding var isMicrophoneEnabled: Bool  // Microphone state
+    let onMicrophoneToggle: () -> Void  // Callback to toggle microphone
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.voiceEnabled) private var voiceEnabled
@@ -78,25 +79,22 @@ struct ControlBar: View {
     private func audioControls() -> some View {
         HStack(spacing: .zero) {
             Spacer()
-            AsyncButton(action: localMedia.toggleMicrophone) {
+            Button(action: onMicrophoneToggle) {
                 HStack(spacing: 1.5 * .grid) {
-                    Image(systemName: localMedia.isMicrophoneEnabled ? "microphone.fill" : "microphone.slash.fill")
+                    Image(systemName: isMicrophoneEnabled ? "microphone.fill" : "microphone.slash.fill")
                         .font(.system(size: 32, weight: .medium)) // Enlarged icon
                         .transition(.symbolEffect)
-                    BarAudioVisualizer(audioTrack: localMedia.microphoneTrack, barColor: .fg1, barCount: 3, barSpacingFactor: 0.15)
+                    // Get microphone track from session
+                    let micTrack = session.room.localParticipant.audioTracks.first(where: { $0.source == .microphone })?.track as? LocalAudioTrack
+                    BarAudioVisualizer(audioTrack: micTrack, barColor: .fg1, barCount: 3, barSpacingFactor: 0.15)
                         .frame(width: 4 * .grid, height: 0.6 * Constants.buttonHeight) // Larger waveform
                         .frame(maxHeight: .infinity)
-                        .id(localMedia.microphoneTrack?.id)
+                        .id(micTrack?.id)
                 }
                 .frame(height: Constants.buttonHeight)
                 .padding(.horizontal, 3 * .grid)
                 .contentShape(Rectangle())
             }
-            #if os(macOS)
-            separator()
-            AudioDeviceSelector()
-                .frame(height: Constants.buttonHeight)
-            #endif
             Spacer()
         }
         .frame(width: Constants.buttonWidth)

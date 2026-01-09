@@ -261,7 +261,6 @@ public struct ZumuTranslatorView: View {
 private struct ZumuTranslatorSessionView: View {
     // ✅ Proper @StateObject for ObservableObject lifecycle
     @StateObject private var session: Session
-    @StateObject private var localMedia: LocalMedia
 
     // Track if cleanup has been initiated (prevents double cleanup)
     @State private var isCleaningUp = false
@@ -271,6 +270,9 @@ private struct ZumuTranslatorSessionView: View {
 
     // Cache messages to avoid reading session.messages during disconnect (causes mutex deadlock)
     @State private var cachedMessages: [ReceivedMessage] = []
+
+    // Microphone state (replaces LocalMedia.isMicrophoneEnabled)
+    @State private var isMicrophoneEnabled: Bool = true
 
     let config: ZumuTranslator.TranslationConfig
     let onDismiss: DismissAction
@@ -316,7 +318,6 @@ private struct ZumuTranslatorSessionView: View {
         )
 
         _session = StateObject(wrappedValue: newSession)
-        _localMedia = StateObject(wrappedValue: LocalMedia(session: newSession))
     }
 
     // MARK: - Session Lifecycle
@@ -325,7 +326,7 @@ private struct ZumuTranslatorSessionView: View {
 
     public var body: some View {
         // ✅ Session always exists (created in init)
-        sessionInterface(session: session, localMedia: localMedia)
+        sessionInterface(session: session)
         .environment(\.translationConfig, config)
         .background(.bg1)
         .onAppear {
@@ -435,6 +436,24 @@ private struct ZumuTranslatorSessionView: View {
         print("🔧 AudioManager configuration complete")
     }
 
+    // MARK: - Microphone Control
+
+    /// Toggle microphone on/off using LiveKit SDK directly
+    private func toggleMicrophone() {
+        Task {
+            do {
+                let newState = !isMicrophoneEnabled
+                try await session.room.localParticipant.setMicrophone(enabled: newState)
+                await MainActor.run {
+                    isMicrophoneEnabled = newState
+                }
+                print("🎤 Microphone toggled to: \(newState)")
+            } catch {
+                print("❌ Failed to toggle microphone: \(error)")
+            }
+        }
+    }
+
     // MARK: - View Helpers
 
     /// Loading view shown while session is being created
@@ -454,20 +473,20 @@ private struct ZumuTranslatorSessionView: View {
 
     /// Main session interface with session/localMedia passed as parameters
     @ViewBuilder
-    private func sessionInterface(session: Session, localMedia: LocalMedia) -> some View {
+    private func sessionInterface(session: Session) -> some View {
         ZStack(alignment: .top) {
             // Use cached state instead of session.isConnected to prevent mutex deadlock during disconnect
             if isConnectedCache {
-                translationInterface(session: session, localMedia: localMedia)
+                translationInterface(session: session)
             } else {
-                connectingView(session: session, localMedia: localMedia)
+                connectingView(session: session)
             }
 
             // Close button overlay (always visible)
             closeButton(session: session)
                 .padding()
 
-            errors(session: session, localMedia: localMedia)
+            errors(session: session)
         }
         // REMOVED: .animation(.default, value: session.isConnected) - reactive observer causes recursive mutex lock during disconnect
     }
@@ -493,7 +512,7 @@ private struct ZumuTranslatorSessionView: View {
     }
 
     @ViewBuilder
-    private func connectingView(session: Session, localMedia: LocalMedia) -> some View {
+    private func connectingView(session: Session) -> some View {
         ZStack {
             // Subtle waveform placeholder - minimal presence
             BarAudioVisualizer(audioTrack: nil,
@@ -550,14 +569,12 @@ private struct ZumuTranslatorSessionView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environmentObject(session)
-        .environmentObject(localMedia)
     }
 
     @ViewBuilder
-    private func translationInterface(session: Session, localMedia: LocalMedia) -> some View {
+    private func translationInterface(session: Session) -> some View {
         VoiceInteractionView()
             .environmentObject(session)
-            .environmentObject(localMedia)
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Clean, minimal text - adaptive for dark mode
                 HStack(spacing: 12) {
@@ -599,9 +616,13 @@ private struct ZumuTranslatorSessionView: View {
                         .environmentObject(session)
 
                     // Control bar - pass cached state to prevent mutex access
-                    ControlBar(chat: .constant(false), isConnected: isConnectedCache)
+                    ControlBar(
+                        chat: .constant(false),
+                        isConnected: isConnectedCache,
+                        isMicrophoneEnabled: $isMicrophoneEnabled,
+                        onMicrophoneToggle: toggleMicrophone
+                    )
                         .environmentObject(session)
-                        .environmentObject(localMedia)
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                         .onDisconnect {
                             onDismiss()
@@ -611,7 +632,7 @@ private struct ZumuTranslatorSessionView: View {
     }
 
     @ViewBuilder
-    private func errors(session: Session, localMedia: LocalMedia) -> some View {
+    private func errors(session: Session) -> some View {
         if let error = session.error {
             ErrorView(error: error) { session.dismissError() }
         }
@@ -621,10 +642,6 @@ private struct ZumuTranslatorSessionView: View {
                 // ✅ Simple dismissal - onDisappear handles cleanup
                 onDismiss()
             }
-        }
-
-        if let mediaError = localMedia.error {
-            ErrorView(error: mediaError) { localMedia.dismissError() }
         }
     }
 }
