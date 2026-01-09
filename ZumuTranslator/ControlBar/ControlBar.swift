@@ -8,6 +8,8 @@ struct ControlBar: View {
     @EnvironmentObject private var localMedia: LocalMedia
 
     @Binding var chat: Bool
+    let isConnected: Bool  // Pass from parent to avoid reading session.isConnected during disconnect
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.voiceEnabled) private var voiceEnabled
     @Environment(\.videoEnabled) private var videoEnabled
@@ -120,7 +122,7 @@ struct ControlBar: View {
                 borderColor: .separatorSerious
             )
         )
-        .disabled(!session.isConnected)
+        .disabled(!isConnected)  // Use parameter instead of session.isConnected to prevent mutex deadlock
     }
 }
 

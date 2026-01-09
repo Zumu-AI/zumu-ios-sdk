@@ -527,8 +527,8 @@ private struct ZumuTranslatorSessionView: View {
                         .padding(.bottom, 24)
                         .environmentObject(session)
 
-                    // Control bar
-                    ControlBar(chat: .constant(false))
+                    // Control bar - pass cached state to prevent mutex access
+                    ControlBar(chat: .constant(false), isConnected: isConnectedCache)
                         .environmentObject(session)
                         .environmentObject(localMedia)
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
