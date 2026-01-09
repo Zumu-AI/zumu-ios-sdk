@@ -8,14 +8,17 @@ struct TranscriptView: View {
     @EnvironmentObject var session: Session
     @Environment(\.translationConfig) var config
 
+    // Pass messages as parameter to prevent mutex access during disconnect
+    let messages: [ReceivedMessage]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Show only last 2 messages for cleaner, more readable UI
-            ForEach(Array(session.messages.suffix(2).enumerated()), id: \.element.id) { index, message in
+            ForEach(Array(messages.suffix(2).enumerated()), id: \.element.id) { index, message in
                 TranscriptMessageView(
                     message: message,
                     config: config,
-                    isOlder: index == 0 && session.messages.count > 1
+                    isOlder: index == 0 && messages.count > 1
                 )
             }
 
@@ -108,7 +111,7 @@ struct TranscriptView_Previews: PreviewProvider {
         // Create mock session
         let session = Session(tokenSource: tokenSource.cached())
 
-        TranscriptView()
+        TranscriptView(messages: [])
             .environmentObject(session)
             .environment(\.translationConfig, config)
             .background(.black)

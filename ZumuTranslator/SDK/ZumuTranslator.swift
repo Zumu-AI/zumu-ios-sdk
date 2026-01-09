@@ -213,6 +213,9 @@ private struct ZumuTranslatorSessionView: View {
     // Cache connection state to avoid reading session.isConnected during disconnect (causes mutex deadlock)
     @State private var isConnectedCache: Bool = false
 
+    // Cache messages to avoid reading session.messages during disconnect (causes mutex deadlock)
+    @State private var cachedMessages: [ReceivedMessage] = []
+
     let config: ZumuTranslator.TranslationConfig
     let onDismiss: DismissAction
 
@@ -289,8 +292,9 @@ private struct ZumuTranslatorSessionView: View {
                 print("   Starting new session...")
                 await session.start()
 
-                // Cache connection state (safe: one-time read after start completes)
+                // Cache connection state and messages (safe: one-time read after start completes)
                 isConnectedCache = session.isConnected
+                cachedMessages = session.messages
                 print("   ✅ Session connected, cache updated")
             }
 
@@ -299,6 +303,13 @@ private struct ZumuTranslatorSessionView: View {
         }
         // REMOVED: .onChange(of: session.isConnected) - reactive observer causes recursive mutex lock during disconnect
         // All diagnostic tasks removed - any access to session properties during disconnect can cause recursive mutex lock
+        .onChange(of: session.messages) { _, newMessages in
+            // Update messages cache when they change (safe: only fires when connected)
+            // CRITICAL: This is guarded by isConnectedCache check to prevent mutex access during disconnect
+            if isConnectedCache {
+                cachedMessages = newMessages
+            }
+        }
         .onDisappear {
             print("🔴 Session view disappearing")
             // ✅ Prevent double cleanup if disconnect button already initiated it
@@ -308,8 +319,9 @@ private struct ZumuTranslatorSessionView: View {
             }
             isCleaningUp = true
 
-            // CRITICAL: Set cache to false BEFORE calling session.end() to prevent view from reading session.isConnected
+            // CRITICAL: Clear caches BEFORE calling session.end() to prevent view from reading session properties
             isConnectedCache = false
+            cachedMessages = []
             print("   ✅ Connection cache cleared")
 
             // ✅ Following LiveKit pattern: Just call end() and trust async cleanup
@@ -522,7 +534,8 @@ private struct ZumuTranslatorSessionView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     // Clean transcript - no background, larger text, only last 2 messages
-                    TranscriptView()
+                    // Pass cached messages to prevent mutex access during disconnect
+                    TranscriptView(messages: cachedMessages)
                         .frame(minHeight: 140, maxHeight: 180)
                         .padding(.bottom, 24)
                         .environmentObject(session)
