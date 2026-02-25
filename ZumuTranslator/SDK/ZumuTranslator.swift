@@ -361,8 +361,22 @@ private struct ZumuTranslatorSessionView: View {
                 print("   ✅ Session connected, cache updated")
             }
         }
-        // REMOVED: .onChange(of: session.isConnected) - reactive observer causes recursive mutex lock during disconnect
-        // All diagnostic tasks removed - any access to session properties during disconnect can cause recursive mutex lock
+        // Detect server-side disconnect (e.g., agent deleted room due to inactivity)
+        // SAFE: Only reacts to true→false transition, clears caches immediately,
+        // and dismisses WITHOUT reading any other session properties (avoids mutex deadlock)
+        .onChange(of: session.isConnected) { oldValue, newValue in
+            if oldValue == true && newValue == false && !isCleaningUp {
+                print("🔌 Server-side disconnect detected (room deleted by agent)")
+                isCleaningUp = true
+                isConnectedCache = false
+                cachedMessages = []
+                Task {
+                    await session.end()
+                    SessionCoordinator.shared.unregisterSession(session)
+                }
+                onDismiss()
+            }
+        }
         .onChange(of: session.messages) { _, newMessages in
             // Update messages cache when they change (safe: only fires when connected)
             // CRITICAL: This is guarded by isConnectedCache check to prevent mutex access during disconnect
